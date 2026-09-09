@@ -1,0 +1,59 @@
+<!doctype html><html lang="zh-CN"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>跳转方式测试</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:#FAF7F2;color:#2A2521;font:15px/1.6 -apple-system,"PingFang SC",system-ui,sans-serif;padding:22px 16px 60px}
+@media(prefers-color-scheme:dark){body{background:#17140F;color:#F2ECE2}}
+.wrap{max-width:640px;margin:0 auto}
+h1{font-size:19px;margin-bottom:10px}
+.tip{background:#F3E3E0;color:#8A2E26;border-radius:10px;padding:12px 14px;font-size:13.5px;line-height:1.7;margin-bottom:18px}
+@media(prefers-color-scheme:dark){.tip{background:#3A231E;color:#E0705F}}
+ul{list-style:none;display:flex;flex-direction:column;gap:10px}
+li{display:flex;align-items:center;gap:12px;background:#fff;border:1px solid #E8E0D5;border-radius:12px;padding:13px 14px}
+@media(prefers-color-scheme:dark){li{background:#211D17;border-color:#322C24}}
+.k{flex:none;width:26px;height:26px;border-radius:50%;background:#B3392F;color:#fff;font-size:13px;font-weight:700;display:grid;place-items:center}
+.d{flex:1;min-width:0;font-size:13px}
+.d b{display:block;font-weight:600;margin-bottom:3px}
+.d code{display:block;font-size:11px;color:#7A6F64;word-break:break-all;line-height:1.4}
+@media(prefers-color-scheme:dark){.d code{color:#A2968A}}
+.go{flex:none;background:#B3392F;color:#fff;text-decoration:none;font-size:13px;padding:8px 14px;border-radius:8px}
+.foot{margin-top:22px;font-size:13px;color:#7A6F64;line-height:1.8}
+@media(prefers-color-scheme:dark){.foot{color:#A2968A}}
+</style></head><body><div class="wrap">
+<h1>跳转方式测试</h1>
+<div class="tip"><b>请用手机打开这个页面</b>，从 A 挨个点到 G。<br>
+哪个能跳进小红书看到「驴打滚原来这么简单」这篇笔记，就记住它的字母告诉我。<br>
+点了没反应、或弹出"打不开网页"，就退回来点下一个。</div>
+<ul><li>
+  <div class="k">A</div>
+  <div class="d"><b>通用格式（页面现在用的）</b><code>xhsdiscover://item/6a9fd954000000000b003a8c</code></div>
+  <a class="go" href="xhsdiscover://item/6a9fd954000000000b003a8c">试这个</a>
+</li><li>
+  <div class="k">B</div>
+  <div class="d"><b>通用格式＋视频参数</b><code>xhsdiscover://item/6a9fd954000000000b003a8c?type=video</code></div>
+  <a class="go" href="xhsdiscover://item/6a9fd954000000000b003a8c?type=video">试这个</a>
+</li><li>
+  <div class="k">C</div>
+  <div class="d"><b>iOS 常见格式</b><code>xhsdiscover://detail?noteId=6a9fd954000000000b003a8c</code></div>
+  <a class="go" href="xhsdiscover://detail?noteId=6a9fd954000000000b003a8c">试这个</a>
+</li><li>
+  <div class="k">D</div>
+  <div class="d"><b>安卓常见格式（注意是 discovery）</b><code>xhsdiscovery://note?noteId=6a9fd954000000000b003a8c</code></div>
+  <a class="go" href="xhsdiscovery://note?noteId=6a9fd954000000000b003a8c">试这个</a>
+</li><li>
+  <div class="k">E</div>
+  <div class="d"><b>用 App 内置浏览器打开</b><code>xhsdiscover://webview?url=https%3A%2F%2Fwww.xiaohongshu.com%2Fexplore%2F6a9f…</code></div>
+  <a class="go" href="xhsdiscover://webview?url=https%3A%2F%2Fwww.xiaohongshu.com%2Fexplore%2F6a9fd954000000000b003a8c">试这个</a>
+</li><li>
+  <div class="k">F</div>
+  <div class="d"><b>唤起 App 搜索这个标题</b><code>xhsdiscover://search/result?keyword=%E9%A9%B4%E6%89%93%E6%BB%9A%E5%8E%9F%E6%…</code></div>
+  <a class="go" href="xhsdiscover://search/result?keyword=%E9%A9%B4%E6%89%93%E6%BB%9A%E5%8E%9F%E6%9D%A5%E8%BF%99%E4%B9%88%E7%AE%80%E5%8D%95">试这个</a>
+</li><li>
+  <div class="k">G</div>
+  <div class="d"><b>普通网页链接（对照组，看手机会不会自动跳 App）</b><code>https://www.xiaohongshu.com/explore/6a9fd954000000000b003a8c</code></div>
+  <a class="go" href="https://www.xiaohongshu.com/explore/6a9fd954000000000b003a8c">试这个</a>
+</li></ul>
+<p class="foot">测试用的笔记：驴打滚原来这么简单（@小需同学，3001 赞）<br>
+七个都不行的话也告诉我，我换别的思路。</p>
+</div></body></html>
