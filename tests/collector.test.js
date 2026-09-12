@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { normalizeNote, parseResponse, validateParams, verifyPrice, splitResultNotes } = require('../cloudfunctions/collectTick/lib/provider');
+const { normalizeNote, parseResponse, validateParams, verifyPrice, splitResultNotes, imageUrl } = require('../cloudfunctions/collectTick/lib/provider');
 const { historyBaseline, eligibleBoards } = require('../cloudfunctions/collectTick/lib/ranking');
 const { parseJudgment, judgeNote } = require('../cloudfunctions/collectTick/lib/judge');
 const { scheduledRound } = require('../cloudfunctions/collectTick/lib/config');
@@ -37,6 +37,13 @@ test('windows include the lower boundary, exclude the upper boundary, and use fi
   assert.deepEqual(eligibleBoards(candidate({ publishedAt: new Date(NOW - 5 * 86400000 - 1).toISOString() }), NOW), []);
   assert.deepEqual(eligibleBoards(candidate({ likes: 10000, fans: 5001 }), NOW), ['today', 'week']);
   assert.deepEqual(eligibleBoards(candidate({ likes: null, fans: null }), NOW), []);
+  assert.deepEqual(eligibleBoards(candidate({ likes: 299 }), NOW), []);
+  assert.deepEqual(eligibleBoards(candidate({ likes: 300 }), NOW), ['dark']);
+});
+test('the recorded Rednote image CDN is supported without accepting arbitrary image hosts', () => {
+  assert.equal(imageUrl('https://sns-i11.rednotecdn.com/image.jpg'), 'https://sns-i11.rednotecdn.com/image.jpg');
+  assert.equal(imageUrl('https://rednotecdn.com.evil.test/image.jpg'), null);
+  assert.equal(imageUrl('http://127.0.0.1/private'), null);
 });
 test('normalization preserves unknown metrics and unknown pin status, rejects invalid IDs', () => {
   const raw = { id: ID(1), user: { userid: ID(2), nickname: '作者' }, type: 'video',

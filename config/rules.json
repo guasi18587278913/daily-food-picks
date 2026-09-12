@@ -1,5 +1,5 @@
 {
-  "version": "2026-09-12-seven-history-five-day-dark",
+  "version": "2026-09-12-seven-history-five-day-dark-300",
   "timezone": "Asia/Shanghai",
   "scheduleHours": [9, 12, 20],
   "windowMinutes": 20,
@@ -10,6 +10,7 @@
   "weekMinimumLikes": 10000,
   "darkDays": 5,
   "darkMaximumFans": 5000,
+  "darkMinimumLikes": 300,
   "dailyCalls": 50,
   "roundCalls": [17, 17, 16],
   "initialValidationCalls": 20,

@@ -13,7 +13,8 @@ exports.main = async event => {
     const context = wx.getWXContext();
     const store = new CloudStore(cloudbase.init({ env: envId }).database());
     // Temporary setup captures only the last genuine caller, never grants permission.
-    if (process.env.DFP_CAPTURE_CALLER_FOR_SETUP === 'true' && context.APPID === config.appId && context.OPENID) {
+    if (process.env.DFP_CAPTURE_CALLER_FOR_SETUP === 'true' && context.APPID === config.appId && context.OPENID
+      && !config.allowedOpenIds.includes(context.OPENID)) {
       await store.put('dfp_state', 'setup-last-caller', { appId: context.APPID, openId: context.OPENID, seenAt: new Date().toISOString() });
     }
     return await createCatalog({ store, config,

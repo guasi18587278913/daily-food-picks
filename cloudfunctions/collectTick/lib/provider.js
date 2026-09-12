@@ -24,7 +24,7 @@ function imageUrl(value) {
   try {
     const url = new URL(value);
     if (['http:', 'https:'].includes(url.protocol) && !url.username && !url.password
-      && /(^|\.)(xhscdn\.com|xiaohongshu\.com)$/.test(url.hostname) && url.href.length <= 3000) {
+      && /(^|\.)(xhscdn\.com|xiaohongshu\.com|rednotecdn\.com)$/.test(url.hostname) && url.href.length <= 3000) {
       url.protocol = 'https:'; return url.href;
     }
   } catch {}

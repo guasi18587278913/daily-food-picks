@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { MemoryStore, NOW, PRICE } = require('./helpers');
-const { runTick } = require('../cloudfunctions/collectTick/lib/runner');
+const { runTick, prioritizeCandidates } = require('../cloudfunctions/collectTick/lib/runner');
 const id = '000000000000000000000001';
 const config = { enabled: true, freeAiConfirmed: true, dailyCalls: 50, dailyMicroUsd: 500000,
   validationCalls: 20, validationMicroUsd: 200000, maxAiCallsPerRound: 20 };
@@ -10,6 +10,14 @@ test('disabled collectors do no provider or model work', async () => {
   let called = 0;
   const result = await runTick({ config: { ...config, enabled: false }, makeProvider: () => { called++; }, store: new MemoryStore(), clock: () => NOW });
   assert.equal(result.status, 'disabled'); assert.equal(called, 0);
+});
+test('limited discovery checks posts with recipe clues before high-like eating shows', () => {
+  const rows = [
+    { note: { noteId: 'a', likes: 50000, title: '沉浸式吃饭', desc: '#吃播' } },
+    { note: { noteId: 'b', likes: 3000, title: '蒸蛋', desc: '食材：鸡蛋2个，水100毫升' } },
+    { note: { noteId: 'c', likes: 500, title: '家常小炒', desc: '制作步骤：倒入青椒炒熟' } }
+  ];
+  assert.deepEqual(prioritizeCandidates(rows).map(x => x.note.noteId), ['b', 'c', 'a']);
 });
 test('repeated ticks resume an empty completed round without buying search pages again', async () => {
   const store = new MemoryStore(); let calls = 0;

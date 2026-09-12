@@ -17,6 +17,21 @@ function searches(round) {
   return group.flatMap(keyword => KEYWORDS.noteTypes.map(note_type => ({ keyword, note_type, page: 1,
     sort_type: 'popularity_descending', time_filter: '一周内', source: 'explore_feed', ai_mode: 0 })));
 }
+function prioritizeCandidates(rows) {
+  const score = row => {
+    const body = String(row.note.desc || '').replace(/#[^#]*#/g, ' ');
+    return (/食材|用料|配方|步骤|制作方法/.test(body) ? 2 : 0)
+      + (/\d+(?:\.\d+)?\s*(?:kg|ml|g|克|毫升|个|勺)/i.test(body) ? 1 : 0)
+      + (/教程|做法|自制|怎么做|这样做/.test(row.note.title || '') ? 1 : 0);
+  };
+  const ordered = [];
+  for (let level = 4; level >= 0; level--) {
+    const group = rows.filter(row => score(row) === level)
+      .sort((a, b) => (b.note.likes ?? -1) - (a.note.likes ?? -1) || a.note.noteId.localeCompare(b.note.noteId));
+    while (group.length) { ordered.push(group.shift()); if (group.length) ordered.push(group.pop()); }
+  }
+  return ordered;
+}
 async function saveProgress(store, lease, roundId, progress, clock) {
   await store.transaction(async tx => {
     await assertLease(tx, lease, clock());
@@ -122,9 +137,8 @@ async function runTick({ store, config, key, generate, upload, clock = Date.now,
       }
       if (progress.candidateIds === null) {
         const rows = await candidateRows(store, round.id);
-        rows.sort((a, b) => (b.note.likes ?? -1) - (a.note.likes ?? -1) || a.note.noteId.localeCompare(b.note.noteId));
-        // Alternate popular and smaller candidates so the small daily budget still explores low-follower work.
-        const ordered = []; while (rows.length) { ordered.push(rows.shift()); if (rows.length) ordered.push(rows.pop()); }
+        // Clues only prioritize paid inspection; publication still requires full-body model evidence.
+        const ordered = prioritizeCandidates(rows);
         progress.candidateIds = ordered.slice(0, 40).map(x => x.note.noteId);
         if (ordered.length > 40) progress.gaps.push('CANDIDATE_CAP');
         await saveProgress(store, lease, round.id, progress, clock);
@@ -203,4 +217,4 @@ async function runTick({ store, config, key, generate, upload, clock = Date.now,
   } finally { await releaseLease(store, lease); }
 }
 
-module.exports = { runTick, searches, conclude };
+module.exports = { runTick, searches, conclude, prioritizeCandidates };

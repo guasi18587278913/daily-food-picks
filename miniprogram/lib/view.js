@@ -22,7 +22,7 @@ function sortNotes(notes, key) {
 const BOARD_INFO = {
   today: { name: '今日新锐', subtitle: '近 24 小时 · 至少 1,000 赞', sort: 'ratio', options: [['ratio', '倍数'], ['likes', '点赞'], ['collected', '收藏'], ['comments', '评论']] },
   week: { name: '本周热门', subtitle: '近 7 天 · 至少 1 万赞', sort: 'likes', options: [['likes', '点赞'], ['collected', '收藏'], ['comments', '评论']] },
-  dark: { name: '低粉黑马', subtitle: '近 5 天 · 粉丝不超过 5,000', sort: 'likes', options: [['likes', '点赞'], ['fanRatio', '赞粉比'], ['collected', '收藏'], ['comments', '评论']] }
+  dark: { name: '低粉黑马', subtitle: '近 5 天 · 至少 300 赞 · 粉丝不超过 5,000', sort: 'likes', options: [['likes', '点赞'], ['fanRatio', '赞粉比'], ['collected', '收藏'], ['comments', '评论']] }
 };
 /** @param {FoodNote} note @param {string} board @param {string} sort @param {boolean} favorite */
 function card(note, board, sort, favorite) {

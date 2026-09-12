@@ -10,7 +10,7 @@ function eligibleBoards(note, end, { allowUnknownFans = false } = {}) {
   const boards = [];
   if (inWindow(note, end, 1) && note.likes >= 1000) boards.push('today');
   if (inWindow(note, end, 7) && note.likes >= 10000) boards.push('week');
-  if (inWindow(note, end, 5) && ((metric(note.fans) && note.fans <= 5000) || (allowUnknownFans && note.fans === null))) boards.push('dark');
+  if (inWindow(note, end, 5) && note.likes >= 300 && ((metric(note.fans) && note.fans <= 5000) || (allowUnknownFans && note.fans === null))) boards.push('dark');
   return boards;
 }
 function historyBaseline(candidate, rawRows) {
