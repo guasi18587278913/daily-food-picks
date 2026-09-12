@@ -1,0 +1,13 @@
+{
+  "version": "2026-09-12-budgeted-core",
+  "selection": "Rotate one two-keyword group per round; query video and image notes from the past week, then enforce the 24-hour, five-day and seven-day windows locally.",
+  "groups": [
+    ["美食教程", "家常菜"],
+    ["烘焙", "面食"],
+    ["一人食", "创意料理"],
+    ["甜品", "自制饮品"]
+  ],
+  "pagesPerQuery": 1,
+  "noteTypes": ["视频笔记", "普通笔记"],
+  "coverageNotice": "基于当轮关键词与页数发现选题，未覆盖小红书全部内容。"
+}

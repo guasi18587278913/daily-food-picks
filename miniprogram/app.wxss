@@ -1,0 +1,2 @@
+page{background:#f7f3eb;color:#302b23;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft Yahei",sans-serif;font-size:28rpx;line-height:1.6}
+button,input{font:inherit}button{width:auto;min-width:0;margin:0;padding:0;border-radius:0;line-height:inherit;background:transparent;color:inherit}button::after{border:0}button[disabled]{opacity:.45}view,text,image,input,button{box-sizing:border-box}

@@ -1,0 +1,4 @@
+{
+  "database": { "read": false, "write": false },
+  "storage": { "read": false, "write": false }
+}

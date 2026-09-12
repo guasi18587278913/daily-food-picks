@@ -1,0 +1,5 @@
+{
+  "timezone": "Asia/Shanghai",
+  "trigger": { "name": "food-picks-timer", "type": "timer", "config": "0 0-20/2 9,12,20 * * * *" },
+  "note": "Minute 20 only finalizes the window. Collection itself is allowed only during the first 20 minutes."
+}

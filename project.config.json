@@ -1,0 +1,31 @@
+{
+  "appid": "wx8a2388888683b769",
+  "projectname": "daily-food-picks",
+  "compileType": "miniprogram",
+  "miniprogramRoot": "miniprogram/",
+  "cloudfunctionRoot": "cloudfunctions/",
+  "setting": {
+    "es6": true,
+    "urlCheck": true,
+    "postcss": false,
+    "minified": true,
+    "enhance": true,
+    "minifyWXML": true
+  },
+  "packOptions": {
+    "ignore": [
+      {
+        "type": "suffix",
+        "value": ".pem"
+      },
+      {
+        "type": "suffix",
+        "value": ".key"
+      },
+      {
+        "type": "suffix",
+        "value": ".local.json"
+      }
+    ]
+  }
+}

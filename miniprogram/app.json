@@ -1,0 +1,14 @@
+{
+  "pages": ["pages/index/index"],
+  "window": {
+    "navigationBarTitleText": "深夜食堂选题台",
+    "navigationBarBackgroundColor": "#f7f3eb",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f7f3eb",
+    "backgroundTextStyle": "dark",
+    "enablePullDownRefresh": true
+  },
+  "style": "v2",
+  "lazyCodeLoading": "requiredComponents",
+  "sitemapLocation": "sitemap.json"
+}

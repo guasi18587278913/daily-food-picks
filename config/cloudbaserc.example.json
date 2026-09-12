@@ -1,0 +1,37 @@
+{
+  "version": "2.0",
+  "envId": "food-picks-trial-d5elis0ecfcb5d2",
+  "functionRoot": "cloudfunctions",
+  "functions": [
+    {
+      "name": "collectTick",
+      "runtime": "Nodejs20.19",
+      "handler": "index.main",
+      "timeout": 180,
+      "memorySize": 512,
+      "envVariables": {
+        "DFP_ENABLED": "false",
+        "DFP_APP_ID": "wx8a2388888683b769",
+        "DFP_DAILY_CALLS": "",
+        "DFP_DAILY_MICRO_USD": "",
+        "DFP_VALIDATION_CALLS": "",
+        "DFP_VALIDATION_MICRO_USD": "",
+        "DFP_FREE_AI_CONFIRMED": "false",
+        "DFP_AI_PROVIDER": "hunyuan-v3",
+        "DFP_AI_MODEL": "hy3"
+      },
+      "triggers": []
+    },
+    {
+      "name": "catalog",
+      "runtime": "Nodejs20.19",
+      "handler": "index.main",
+      "timeout": 30,
+      "memorySize": 256,
+      "envVariables": {
+        "DFP_APP_ID": "wx8a2388888683b769",
+        "DFP_ALLOWED_OPENIDS": ""
+      }
+    }
+  ]
+}

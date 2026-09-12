@@ -1,0 +1,24 @@
+{
+  "name": "daily-food-picks",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WeChat member trial for cooking content ideas",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "workspaces": [
+    "cloudfunctions/*"
+  ],
+  "scripts": {
+    "prepare:functions": "node scripts/prepare-functions.js",
+    "pretest": "node scripts/prepare-functions.js",
+    "test": "node --test tests/*.test.js",
+    "typecheck:mini": "tsc -p jsconfig.json",
+    "check:package": "node scripts/check-package.js"
+  },
+  "devDependencies": {
+    "miniprogram-api-typings": "5.2.3",
+    "miniprogram-automator": "0.12.1",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,74 @@
+<template name="noteCard">
+  <view class="note-card">
+    <view class="note-main">
+      <view class="cover-wrap">
+        <image wx:if="{{note.thumbUrl}}" class="cover" src="{{note.thumbUrl}}" mode="aspectFill" lazy-load data-id="{{note.noteId}}" binderror="onImageError" />
+        <view wx:else class="cover placeholder"><text>食</text><text class="placeholder-small">选题灵感</text></view>
+        <text class="type-badge">{{note.typeLabel}}</text>
+      </view>
+      <view class="note-body">
+        <text class="note-title">{{note.displayTitle}}</text>
+        <view class="author-line"><text>{{note.author || '作者未提供'}}</text><text class="dot">·</text><text>{{note.publishedLabel}}</text></view>
+        <view class="metric-row"><text class="metric">{{note.big}}</text><text class="metric-unit">{{note.unit}}</text></view>
+      </view>
+    </view>
+    <text class="comparison">{{note.comparison}}</text>
+    <view class="card-actions">
+      <button class="favorite {{note.favorite ? 'saved' : ''}}" data-id="{{note.noteId}}" bindtap="onFavorite" aria-label="{{note.favorite ? '取消收藏' : '收藏选题'}}"><text class="star">{{note.favorite ? '★' : '☆'}}</text>{{note.favorite ? '已收藏' : '收藏选题'}}</button>
+      <button class="source" data-id="{{note.noteId}}" bindtap="onCopy">复制原文 <text>↗</text></button>
+    </view>
+  </view>
+</template>
+
+<view class="page">
+  <view class="masthead">
+    <view class="brand-mark">食</view>
+    <view class="brand-copy"><text class="eyebrow">给每一道灵感，留个位置</text><text class="brand-title">深夜食堂选题台</text></view>
+    <text class="trial-stamp">试用</text>
+  </view>
+  <view class="schedule"><view class="status-dot"></view><text>{{statusLabel}}</text><text class="schedule-time">每日 09 / 12 / 20 点更新</text></view>
+
+  <view wx:if="{{locked}}" class="access-state">
+    <text class="empty-symbol">食</text><text class="empty-title">这里为指定成员开放</text><text class="empty-copy">{{message}}</text>
+    <button class="primary" bindtap="checkUpdates">重新查看</button>
+  </view>
+  <block wx:else>
+    <view class="view-tabs">
+      <button class="view-tab {{mode !== 'favorites' ? 'selected' : ''}}" bindtap="onLatest">选题台</button>
+      <button class="view-tab {{mode === 'favorites' ? 'selected' : ''}}" bindtap="onFavorites">我的收藏 <text class="tab-count">{{favoriteCount}}</text></button>
+      <picker class="round-picker" mode="selector" range="{{rounds}}" range-key="label" value="{{roundIndex}}" bindchange="onRoundChange" disabled="{{!rounds.length}}"><view>往期 <text>⌄</text></view></picker>
+    </view>
+    <view class="search-box">
+      <text class="search-icon">⌕</text><input value="{{query}}" placeholder="找一道菜、作者或做法" placeholder-class="input-placeholder" maxlength="100" confirm-type="search" bindinput="onQueryInput" bindconfirm="onSearch" aria-label="搜索全部轮次" />
+      <button wx:if="{{query}}" class="clear-query" bindtap="onClearSearch" aria-label="清空搜索">×</button><button class="search-button" bindtap="onSearch">搜索</button>
+    </view>
+    <button wx:if="{{newAvailable}}" class="update-banner" bindtap="onLatest"><text>新一轮选题已更新</text><text>看看新灵感 →</text></button>
+    <view wx:if="{{message}}" class="notice" role="alert">{{message}}</view>
+    <view class="round-heading"><view><text class="round-title">{{roundLabel}}</text><text wx:if="{{updatedLabel}}" class="updated-label">{{updatedLabel}}</text></view><text class="total">{{total}} <text>篇</text></text></view>
+    <view wx:if="{{partialReason && partialReason !== message}}" class="notice">{{partialReason}}</view>
+
+    <view wx:if="{{loading && !total}}" class="loading-state"><view class="loading-line"></view><text>正在翻开选题本…</text></view>
+    <view wx:elif="{{!total && !missingFavorites.length}}" class="empty-state">
+      <text class="empty-symbol">食</text>
+      <text class="empty-title">{{mode === 'favorites' ? '留住下一道创作灵感' : mode === 'search' ? '这次还没有找到' : '等一轮新鲜灵感'}}</text>
+      <text class="empty-copy">{{mode === 'favorites' ? '看到想做的选题，点一下“收藏选题”。' : mode === 'search' ? '换个菜名或关键词试试，也可以继续查看更早内容。' : '有符合规则的选题时，这里会自动更新。'}}</text>
+    </view>
+
+    <block wx:if="{{mode === 'favorites'}}">
+      <view class="board favorites-board"><block wx:for="{{favoriteCards}}" wx:key="noteId"><template is="noteCard" data="{{note:item}}" /></block></view>
+      <view wx:for="{{missingFavorites}}" wx:key="*this" class="missing-favorite"><text>这篇收藏暂时无法读取</text><button data-id="{{item}}" bindtap="onFavorite">取消收藏</button></view>
+    </block>
+    <block wx:else>
+      <view wx:for="{{boardViews}}" wx:key="key" wx:for-item="board" class="board board-{{board.key}}">
+        <view class="board-heading"><text class="board-index">{{board.key === 'today' ? '01' : board.key === 'week' ? '02' : '03'}}</text><text class="board-name">{{board.name}}</text><text class="board-count">{{board.count}} 篇</text></view>
+        <text class="board-subtitle">{{board.subtitle}}</text>
+        <view class="sort-row"><text class="sort-caption">按</text><button wx:for="{{board.options}}" wx:key="value" wx:for-item="option" class="sort-option {{option.active ? 'active' : ''}}" data-board="{{board.key}}" data-sort="{{option.value}}" bindtap="onSort">{{option.label}}</button></view>
+        <block wx:for="{{board.cards}}" wx:key="noteId"><template is="noteCard" data="{{note:item}}" /></block>
+        <view wx:if="{{!board.cards.length && total}}" class="board-empty">这个板块暂时没有匹配选题</view>
+      </view>
+    </block>
+    <button wx:if="{{nextCursor}}" class="load-more" loading="{{loadingMore}}" disabled="{{loadingMore}}" bindtap="onMore">{{loadingMore ? '读取中' : '继续查看'}}</button>
+    <button wx:if="{{olderRounds}}" class="older-rounds" bindtap="onOlderRounds">加载更早的轮次</button>
+    <view class="footer"><text>{{coverageNotice}}</text><text>指标为采集时数值 · 收藏仅保存在本机</text><view class="footer-line"></view><text class="footer-signature">好选题，让做饭这件事更有意思。</text></view>
+  </block>
+</view>
