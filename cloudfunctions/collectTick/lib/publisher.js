@@ -98,12 +98,17 @@ async function storeCover({ store, upload, note, fetcher = fetch }) {
   if (cached?.fileId) return cached.fileId;
   try {
     const response = await fetcher(url, { redirect: 'error', signal: AbortSignal.timeout(10000) });
-    if (!response.ok || !/^image\/(jpeg|png|webp)(?:;|$)/i.test(response.headers.get('content-type') || '')) return null;
+    const contentType = response.headers.get('content-type') || '';
+    if (!response.ok || !/^(?:image\/(?:jpeg|png|webp)|application\/octet-stream)(?:;|$)/i.test(contentType)) return null;
     // Binary path, bounded independently of JSON provider pages.
     let size = 0; const chunks = [];
     for await (const chunk of response.body) { size += chunk.length; if (size > 2 * 1024 * 1024) return null; chunks.push(Buffer.from(chunk)); }
     const bytes = Buffer.concat(chunks);
-    const ext = (response.headers.get('content-type') || '').includes('png') ? 'png' : (response.headers.get('content-type') || '').includes('webp') ? 'webp' : 'jpg';
+    // Some note CDNs serve real images as octet-stream. Use bytes, not that label, to select the extension.
+    const ext = bytes.length >= 3 && bytes.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])) ? 'jpg'
+      : bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? 'png'
+      : bytes.length >= 12 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP' ? 'webp' : null;
+    if (!ext) return null;
     const result = await upload({ cloudPath: `covers/${digest(bytes)}.${ext}`, fileContent: bytes });
     if (typeof result.fileID !== 'string' || !result.fileID.startsWith('cloud://')) return null;
     await store.put('dfp_state', key, { fileId: result.fileID });

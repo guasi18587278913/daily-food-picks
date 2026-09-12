@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { MemoryStore, NOW } = require('./helpers');
 const { claimLease } = require('../cloudfunctions/collectTick/lib/budget');
-const { publish, previouslyPublished, readSnapshot } = require('../cloudfunctions/collectTick/lib/publisher');
+const { publish, previouslyPublished, readSnapshot, storeCover } = require('../cloudfunctions/collectTick/lib/publisher');
 
 const ID = '000000000000000000000001';
 const note = { noteId: ID, authorId: '000000000000000000000002', title: '蒸蛋', desc: '鸡蛋加水蒸熟',
@@ -75,4 +75,26 @@ test('a stale publisher cannot overwrite the winning snapshot search and favorit
   const reference = await ctx.store.get('dfp_candidates', `published_${ID}`);
   assert.equal(reference.snapshotId, winning.id);
   assert.equal((await ctx.store.get('dfp_notes', reference.indexId)).snapshotId, winning.id);
+});
+test('a verified JPEG with a generic CDN content type is stored as an image', async () => {
+  const store = new MemoryStore();
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 0xff, 0xd9]);
+  const uploads = [];
+  const fileId = await storeCover({ store, note: { coverUrl: 'https://sns-i11.rednotecdn.com/cover' },
+    fetcher: async () => new Response(jpeg, { headers: { 'content-type': 'application/octet-stream' } }),
+    upload: async payload => { uploads.push(payload); return { fileID: 'cloud://trial/cover.jpg' }; } });
+  assert.equal(fileId, 'cloud://trial/cover.jpg');
+  assert.equal(uploads.length, 1);
+  assert.match(uploads[0].cloudPath, /^covers\/[a-f0-9]+\.jpg$/);
+  assert.deepEqual(uploads[0].fileContent, jpeg);
+});
+test('a mislabeled non-image is never stored or cached as a cover', async () => {
+  for (const contentType of ['application/octet-stream', 'image/jpeg']) {
+    const store = new MemoryStore(); let uploads = 0;
+    const fileId = await storeCover({ store, note: { coverUrl: 'https://sns-i11.rednotecdn.com/fake' },
+      fetcher: async () => new Response('<html>not an image</html>', { headers: { 'content-type': contentType } }),
+      upload: async () => { uploads++; return { fileID: 'cloud://trial/fake.jpg' }; } });
+    assert.equal(fileId, null);
+    assert.equal(uploads, 0);
+  }
 });
