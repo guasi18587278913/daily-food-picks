@@ -4,13 +4,14 @@ const cloudbase = require('@cloudbase/node-sdk');
 const { accessConfig } = require('./lib/access');
 const { CloudStore } = require('./lib/store');
 const { createCatalog } = require('./lib/queries');
+const { currentWxContext } = require('./lib/context');
 
-exports.main = async event => {
+exports.main = async (event, runtimeContext) => {
   try {
     const config = accessConfig();
     const envId = process.env.DFP_ENV_ID || 'food-picks-trial-d5elis0ecfcb5d2';
     wx.init({ env: envId });
-    const context = wx.getWXContext();
+    const context = currentWxContext(runtimeContext);
     const store = new CloudStore(cloudbase.init({ env: envId }).database());
     // Temporary setup captures only the last genuine caller, never grants permission.
     if (process.env.DFP_CAPTURE_CALLER_FOR_SETUP === 'true' && context.APPID === config.appId && context.OPENID

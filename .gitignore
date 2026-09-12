@@ -19,4 +19,5 @@ __pycache__/
 .DS_Store
 cloudfunctions/collectTick/config/
 cloudfunctions/catalog/lib/store.js
+cloudfunctions/catalog/lib/context.js
 output/

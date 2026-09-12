@@ -23,7 +23,8 @@ if (size >= 2 * 1024 * 1024) throw new Error('Mini program exceeds the 2 MiB mai
 for (const [a, b] of [
   ['config/rules.json', 'cloudfunctions/collectTick/config/rules.json'],
   ['config/keywords.json', 'cloudfunctions/collectTick/config/keywords.json'],
-  ['cloudfunctions/collectTick/lib/store.js', 'cloudfunctions/catalog/lib/store.js']
+  ['cloudfunctions/collectTick/lib/store.js', 'cloudfunctions/catalog/lib/store.js'],
+  ['cloudfunctions/collectTick/lib/context.js', 'cloudfunctions/catalog/lib/context.js']
 ]) if (!fs.readFileSync(path.join(root, a)).equals(fs.readFileSync(path.join(root, b)))) throw new Error('Run prepare:functions before deployment; generated code is stale');
 const app = JSON.parse(fs.readFileSync(path.join(mini, 'app.json'), 'utf8'));
 for (const page of app.pages) for (const ext of ['.js', '.json', '.wxml', '.wxss']) {

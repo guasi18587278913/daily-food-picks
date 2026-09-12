@@ -5,12 +5,13 @@ const { loadConfig, assertTimer } = require('./lib/config');
 const { CloudStore } = require('./lib/store');
 const { freeModelGenerator } = require('./lib/judge');
 const { runTick } = require('./lib/runner');
+const { currentWxContext } = require('./lib/context');
 
-exports.main = async event => {
+exports.main = async (event, runtimeContext) => {
   try {
     const config = loadConfig();
     wx.init({ env: config.envId });
-    assertTimer(event, wx.getWXContext(), config);
+    assertTimer(event, currentWxContext(runtimeContext), config);
     if (!config.enabled) return { status: 'disabled' };
     const app = cloudbase.init({ env: config.envId });
     return await runTick({ config, store: new CloudStore(app.database()), key: process.env.DFP_TIKHUB_KEY,
