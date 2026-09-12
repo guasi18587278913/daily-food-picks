@@ -11,6 +11,7 @@
       "memorySize": 512,
       "envVariables": {
         "DFP_ENABLED": "false",
+        "DFP_TIMER_SECRET": "",
         "DFP_APP_ID": "wx8a2388888683b769",
         "DFP_DAILY_CALLS": "",
         "DFP_DAILY_MICRO_USD": "",

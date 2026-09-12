@@ -10,7 +10,7 @@ exports.main = async event => {
   try {
     const config = loadConfig();
     wx.init({ env: config.envId });
-    assertTimer(event, wx.getWXContext());
+    assertTimer(event, wx.getWXContext(), config);
     if (!config.enabled) return { status: 'disabled' };
     const app = cloudbase.init({ env: config.envId });
     return await runTick({ config, store: new CloudStore(app.database()), key: process.env.DFP_TIKHUB_KEY,

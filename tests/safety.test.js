@@ -130,3 +130,15 @@ test('invalid or normalized-overflow validation dates stop configuration loading
   }
   assert.doesNotThrow(() => loadConfig({ DFP_VALIDATION_AT: '2026-09-12T16:00:00+08:00' }));
 });
+
+test('a native SCF timer needs a server-only secret and a client cannot replay that credential', () => {
+  const { assertTimer } = require('../cloudfunctions/collectTick/lib/config');
+  const config = { timerSecret: 'a'.repeat(64) };
+  const event = { Type: 'Timer', TriggerName: 'food-picks-timer', Message: config.timerSecret };
+  assert.doesNotThrow(() => assertTimer(event, {}, config));
+  assert.throws(() => assertTimer({ ...event, Message: 'b'.repeat(64) }, {}, config), /UNAUTHORIZED/);
+  assert.throws(() => assertTimer(event, {}, {}), /UNAUTHORIZED/);
+  assert.throws(() => assertTimer(event, { SOURCE: 'wx_client', OPENID: 'owner', APPID: 'wx8a2388888683b769' }, config), /UNAUTHORIZED/);
+  assert.throws(() => assertTimer(event, { SOURCE: 'web' }, config), /UNAUTHORIZED/);
+  assert.throws(() => assertTimer({ ...event, TriggerName: 'other' }, {}, config), /UNAUTHORIZED/);
+});

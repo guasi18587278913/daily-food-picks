@@ -1,6 +1,7 @@
 'use strict';
 
 const { shanghaiDay } = require('./budget');
+const { timingSafeEqual } = require('node:crypto');
 
 function error(code) { const e = new Error(code); e.code = code; return e; }
 function number(value, maximum) {
@@ -23,6 +24,7 @@ function loadConfig(env = process.env) {
     dailyCalls: number(env.DFP_DAILY_CALLS, 50), dailyMicroUsd: number(env.DFP_DAILY_MICRO_USD, 500000),
     validationCalls: number(env.DFP_VALIDATION_CALLS, 20), validationMicroUsd: number(env.DFP_VALIDATION_MICRO_USD, 200000),
     validationAt: env.DFP_VALIDATION_AT || null,
+    timerSecret: env.DFP_TIMER_SECRET || '',
     freeAiConfirmed: env.DFP_FREE_AI_CONFIRMED === 'true',
     aiProvider: env.DFP_AI_PROVIDER || 'hunyuan-v3', aiModel: env.DFP_AI_MODEL || 'hy3',
     maxAiCallsPerRound: 20, maxAiOutputTokens: 1024, maxAiInputChars: 12000,
@@ -31,13 +33,21 @@ function loadConfig(env = process.env) {
   if (config.aiProvider !== 'hunyuan-v3' || config.aiModel !== 'hy3') throw error('FREE_AI_ONLY');
   if (!/^wx[0-9a-f]{16}$/.test(config.appId)) throw error('INVALID_APP_ID');
   if (config.enabled && (!config.dailyCalls || !config.dailyMicroUsd || !config.validationCalls || !config.validationMicroUsd || !config.freeAiConfirmed)) throw error('CONFIGURATION_INCOMPLETE');
+  if (config.enabled && !/^[a-f0-9]{64}$/.test(config.timerSecret)) throw error('CONFIGURATION_INCOMPLETE');
   if (config.validationAt && !validInstant(config.validationAt)) throw error('INVALID_VALIDATION_TIME');
   return config;
 }
 
-function assertTimer(event, wxContext) {
-  if (wxContext?.SOURCE !== 'wx_trigger' || wxContext?.OPENID || wxContext?.APPID || wxContext?.UNIONID
+function assertTimer(event, wxContext, config = {}) {
+  if (wxContext?.OPENID || wxContext?.APPID || wxContext?.UNIONID
     || event?.Type !== 'Timer' || event?.TriggerName !== 'food-picks-timer') throw error('UNAUTHORIZED_TRIGGER');
+  if (wxContext?.SOURCE === 'wx_trigger') return;
+  // Native SCF timers do not pass through the WeChat gateway and have no SOURCE.
+  // Authenticate that path with a credential stored only in server config + trigger metadata.
+  if (![undefined, null, ''].includes(wxContext?.SOURCE)
+    || typeof config.timerSecret !== 'string' || !/^[a-f0-9]{64}$/.test(config.timerSecret)
+    || typeof event.Message !== 'string' || !/^[a-f0-9]{64}$/.test(event.Message)
+    || !timingSafeEqual(Buffer.from(event.Message), Buffer.from(config.timerSecret))) throw error('UNAUTHORIZED_TRIGGER');
 }
 
 function scheduledRound(now, config) {
