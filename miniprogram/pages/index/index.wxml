@@ -28,14 +28,34 @@
   </view>
   <view class="schedule"><view class="status-dot"></view><text>{{statusLabel}}</text><text class="schedule-time">每日 09 / 12 / 20 点更新</text></view>
 
-  <view wx:if="{{locked}}" class="access-state">
-    <text class="empty-symbol">食</text><text class="empty-title">这里为指定成员开放</text><text class="empty-copy">{{message}}</text>
-    <button class="primary" bindtap="checkUpdates">重新查看</button>
+  <view wx:if="{{access === 'checking'}}" class="access-state">
+    <text class="empty-symbol">食</text><text class="empty-copy">正在确认使用资格…</text>
+  </view>
+  <view wx:elif="{{access === 'needsCode'}}" class="access-state">
+    <text class="empty-symbol">食</text><text class="empty-title">输入邀请码开始使用</text>
+    <text class="empty-copy">向管理员要一个邀请码，填进来就能看到每天的选题。不需要手机号，也不用填任何资料。</text>
+    <view class="code-form">
+      <input class="code-input" value="{{codeInput}}" bindinput="onCodeInput" placeholder="例如 ABCDE-FGHJK"
+        maxlength="20" confirm-type="done" bindconfirm="onSubmitCode" disabled="{{redeeming}}" />
+      <button class="primary" bindtap="onSubmitCode" loading="{{redeeming}}" disabled="{{redeeming}}">{{redeeming ? '正在开通' : '开通并进入'}}</button>
+    </view>
+    <text wx:if="{{message}}" class="code-hint">{{message}}</text>
+  </view>
+  <view wx:elif="{{access === 'suspended'}}" class="access-state">
+    <text class="empty-symbol">食</text><text class="empty-title">这个账号已停用</text>
+    <text class="empty-copy">{{message}}</text>
+    <button class="primary" bindtap="checkAccess">重新查看</button>
+  </view>
+  <view wx:elif="{{access === 'blocked'}}" class="access-state">
+    <text class="empty-symbol">食</text><text class="empty-title">暂时无法进入</text>
+    <text class="empty-copy">{{message}}</text>
+    <button class="primary" bindtap="checkAccess">重新查看</button>
   </view>
   <block wx:else>
     <view class="view-tabs">
       <button class="view-tab {{mode !== 'favorites' ? 'selected' : ''}}" bindtap="onLatest">选题台</button>
       <button class="view-tab {{mode === 'favorites' ? 'selected' : ''}}" bindtap="onFavorites">我的收藏 <text class="tab-count">{{favoriteCount}}</text></button>
+      <button wx:if="{{role === 'admin'}}" class="view-tab manage" bindtap="onManage">管理</button>
       <picker class="round-picker" mode="selector" range="{{rounds}}" range-key="label" value="{{roundIndex}}" bindchange="onRoundChange" disabled="{{!rounds.length}}"><view>往期 <text>⌄</text></view></picker>
     </view>
     <view class="search-box">
@@ -69,6 +89,6 @@
     </block>
     <button wx:if="{{nextCursor}}" class="load-more" loading="{{loadingMore}}" disabled="{{loadingMore}}" bindtap="onMore">{{loadingMore ? '读取中' : '继续查看'}}</button>
     <button wx:if="{{olderRounds}}" class="older-rounds" bindtap="onOlderRounds">加载更早的轮次</button>
-    <view class="footer"><text>{{coverageNotice}}</text><text>指标为采集时数值 · 收藏仅保存在本机</text><view class="footer-line"></view><text class="footer-signature">好选题，让做饭这件事更有意思。</text></view>
+    <view class="footer"><text>{{coverageNotice}}</text><text>指标为采集时数值 · {{favoriteNotice}}</text><view class="footer-line"></view><text class="footer-signature">好选题，让做饭这件事更有意思。</text></view>
   </block>
 </view>

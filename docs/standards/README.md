@@ -23,7 +23,8 @@
 
 - [项目根目录](../../README.md)同时保存源码、规格、规范和 Git 历史；旧英文路径只是兼容入口。
 - [微信试用功能规格与计划](../../specs/001-wechat-member-trial/)描述既有业务；其他功能在同一 specs 目录。
-- [源码运行记录](../operations/wechat-trial-runbook.md)记录部署、授权、费用和验收事实。
+- [多用户权限功能](../../specs/003-wechat-login-roles/)描述微信登录、邀请码开通、角色与云端收藏；它修订了 001 的 FR-023。
+- [源码运行记录](../operations/wechat-trial-runbook.md)记录部署、授权、费用和验收事实；多用户权限的部署与迁移记录在[另一份运行记录](../operations/multi-user-access-runbook.md)。
 - `.specify/memory/constitution.md` 已采用 1.0.0，计划阶段的 Constitution Check 必须核对它。
 
 接手时核对需求、当前代码和最近验收记录。规格的旧状态栏可能滞后；实际代码也可能有缺陷。两者冲突时定位具体行为及最近确认，不能只选一份当作绝对正确。

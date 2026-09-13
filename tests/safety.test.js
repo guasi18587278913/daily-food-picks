@@ -92,14 +92,22 @@ test('calendar day accounting uses Shanghai time, including around UTC midnight'
   assert.equal(shanghaiDay(Date.parse('2026-09-12T15:59:59Z')), '2026-09-12');
 });
 
-test('catalog authorization never trusts an event-supplied identity', () => {
+test('catalog authorization never trusts an event-supplied identity', async () => {
   const { authorize } = require('../cloudfunctions/catalog/lib/access');
-  const config = { appId: 'wx8a2388888683b769', allowedOpenIds: ['owner'] };
-  assert.throws(() => authorize({ APPID: config.appId, OPENID: 'stranger' }, config), /FORBIDDEN/);
-  assert.throws(() => authorize({ APPID: 'other-app', OPENID: 'owner' }, config), /UNAUTHENTICATED/);
-  assert.throws(() => authorize({}, config), /UNAUTHENTICATED/);
-  assert.throws(() => authorize({ APPID: config.appId, OPENID: 'owner' }, { ...config, allowedOpenIds: [] }), /FORBIDDEN/);
-  assert.equal(authorize({ APPID: config.appId, OPENID: 'owner' }, config), 'owner');
+  const { MemoryStore } = require('./helpers');
+  const config = { appId: 'wx8a2388888683b769', bootstrapAdminOpenId: '', migrationFallback: false, fallbackOpenIds: [] };
+  const store = new MemoryStore();
+  await store.put('dfp_users', 'owner', { role: 'member', status: 'active', grantedAt: '2026-09-13T00:00:00.000Z',
+    grantedVia: 'invite', inviteCode: 'ABCDEFGHJK', updatedAt: '2026-09-13T00:00:00.000Z', updatedBy: 'owner' });
+  const rejects = (context, code, cfg = config) => assert.rejects(() => authorize(context, cfg, store),
+    error => { assert.equal(error.code, code); return true; });
+
+  await rejects({ APPID: config.appId, OPENID: 'stranger' }, 'NOT_REGISTERED');
+  await rejects({ APPID: 'other-app', OPENID: 'owner' }, 'UNAUTHENTICATED');
+  await rejects({}, 'UNAUTHENTICATED');
+  // A name list in configuration no longer grants anything once the migration window is closed.
+  await rejects({ APPID: config.appId, OPENID: 'listed-only' }, 'NOT_REGISTERED', { ...config, fallbackOpenIds: ['listed-only'] });
+  assert.equal((await authorize({ APPID: config.appId, OPENID: 'owner' }, config, store)).openId, 'owner');
 });
 
 test('a client cannot forge a timer event to invoke the collector', () => {

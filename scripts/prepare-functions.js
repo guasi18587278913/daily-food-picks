@@ -6,7 +6,11 @@ const copies = [
   ['config/rules.json', 'cloudfunctions/collectTick/config/rules.json'],
   ['config/keywords.json', 'cloudfunctions/collectTick/config/keywords.json'],
   ['cloudfunctions/collectTick/lib/store.js', 'cloudfunctions/catalog/lib/store.js'],
-  ['cloudfunctions/collectTick/lib/context.js', 'cloudfunctions/catalog/lib/context.js']
+  ['cloudfunctions/collectTick/lib/context.js', 'cloudfunctions/catalog/lib/context.js'],
+  ['cloudfunctions/collectTick/lib/store.js', 'cloudfunctions/account/lib/store.js'],
+  ['cloudfunctions/collectTick/lib/context.js', 'cloudfunctions/account/lib/context.js'],
+  ['cloudfunctions/account/lib/users.js', 'cloudfunctions/catalog/lib/users.js'],
+  ['cloudfunctions/account/lib/access.js', 'cloudfunctions/catalog/lib/access.js']
 ];
 for (const [source, target] of copies) {
   const bytes = fs.readFileSync(path.join(root, source));

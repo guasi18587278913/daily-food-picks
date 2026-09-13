@@ -20,6 +20,10 @@ __pycache__/
 cloudfunctions/collectTick/config/
 cloudfunctions/catalog/lib/store.js
 cloudfunctions/catalog/lib/context.js
+cloudfunctions/catalog/lib/access.js
+cloudfunctions/catalog/lib/users.js
+cloudfunctions/account/lib/store.js
+cloudfunctions/account/lib/context.js
 output/
 
 # Unified workspace private and historical inputs

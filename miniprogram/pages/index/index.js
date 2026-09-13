@@ -6,15 +6,19 @@ const STORAGE_KEY = 'food-picks:favorites:v1';
 
 Page({
   data: {
-    mode: 'round', query: '', loading: true, loadingMore: false, locked: false, message: '',
+    // access: checking | ready | needsCode | suspended | blocked — decided by the server, never guessed here.
+    access: 'checking', role: '', codeInput: '', redeeming: false,
+    mode: 'round', query: '', loading: true, loadingMore: false, message: '',
     statusLabel: '正在查看更新', roundLabel: '每日三次，给创作找点新意', updatedLabel: '',
     partialReason: '', coverageNotice: '基于当轮关键词发现选题，未覆盖小红书全部内容。',
+    favoriteNotice: '收藏仅保存在本机',
     newAvailable: false, total: 0, favoriteCount: 0, nextCursor: /** @type {string|null} */ (null),
     rounds: /** @type {RoundItem[]} */ ([]), roundIndex: 0, olderRounds: false,
     sorts: /** @type {Record<string,string>} */ ({}), boardViews: boards([], {}, () => false),
     favoriteCards: /** @type {ReturnType<typeof card>[]} */ ([]), missingFavorites: /** @type {string[]} */ ([])
   },
   _api: createApi(options => wx.cloud.callFunction(options)),
+  _account: createApi(options => wx.cloud.callFunction(options), 'account'),
   _favorites: /** @type {ReturnType<typeof createFavorites>|null} */ (null),
   _poller: /** @type {ReturnType<typeof createPoller>|null} */ (null),
   _notes: /** @type {FoodNote[]} */ ([]),
@@ -25,30 +29,109 @@ Page({
   _requestId: 0,
   _statusRequestId: 0,
   _favoriteOffset: 0,
+  _cloudFavorites: false,
   _returnMode: 'round',
+  _visible: false,
   onLoad() {
     this._favorites = createFavorites({ get: () => wx.getStorageSync(STORAGE_KEY), set: value => wx.setStorageSync(STORAGE_KEY, value) });
     this.setData({ favoriteCount: this._favorites.ids().length });
     if (this._favorites.corrupt) wx.showToast({ title: '部分收藏记录无法读取', icon: 'none' });
     this._poller = createPoller(() => this.checkUpdates());
+    void this.checkAccess();
   },
-  onShow() { void this._poller?.show(); },
-  onHide() { this._poller?.hide(); },
-  onUnload() { this._poller?.hide(); this._requestId++; this._statusRequestId++; },
+  onShow() { this._visible = true; if (this.data.access === 'ready') void this._poller?.show(); },
+  onHide() { this._visible = false; this._poller?.hide(); },
+  onUnload() { this._visible = false; this._poller?.hide(); this._requestId++; this._statusRequestId++; },
   async onPullDownRefresh() {
     try {
+      if (this.data.access !== 'ready') { await this.checkAccess(); return; }
       await this.checkUpdates();
       if (this.data.mode === 'search') await this.search();
       else if (this.data.mode === 'favorites') await this.loadFavorites();
       else if (this._currentRoundId) await this.loadRound(this._currentRoundId, this.data.mode);
     } finally { wx.stopPullDownRefresh(); }
   },
+  /** @param {string|undefined} code @returns {string} which screen a refusal leads to */
+  accessStateFor(code) {
+    if (code === 'NOT_REGISTERED') return 'needsCode';
+    if (code === 'SUSPENDED') return 'suspended';
+    return 'blocked';
+  },
+  /** Asks the server who the caller is. Nothing else decides which screen appears. */
+  async checkAccess() {
+    try {
+      const me = await this._account('me');
+      this.setData({ access: 'ready', role: me.role || '', message: '' });
+      await this.syncFavorites();
+      if (this._visible) void this._poller?.show();
+      return true;
+    } catch (caught) {
+      const e = /** @type {FoodError} */ (caught);
+      this.dropAccess(this.accessStateFor(e.code), e.message || '暂时无法读取，请稍后再试。');
+      return false;
+    }
+  },
+  /** @param {string} access @param {string} message */
+  dropAccess(access, message) {
+    this._requestId++; this._statusRequestId++;
+    this._notes = []; this._poller?.hide();
+    this.setData({ access, role: '', boardViews: [], favoriteCards: [], total: 0,
+      message, loading: false, loadingMore: false });
+  },
+  /** @param {{detail:{value:string}}} event */
+  onCodeInput(event) { this.setData({ codeInput: event.detail.value }); },
+  async onSubmitCode() {
+    if (this.data.redeeming) return;
+    const code = this.data.codeInput.trim();
+    if (!code) { wx.showToast({ title: '请先输入邀请码', icon: 'none' }); return; }
+    this.setData({ redeeming: true, message: '' });
+    try {
+      const granted = await this._account('redeem', { code });
+      this.setData({ access: 'ready', role: granted.role || 'member', codeInput: '', redeeming: false, message: '' });
+      wx.showToast({ title: '已开通，正在载入选题', icon: 'none' });
+      if (this._visible) void this._poller?.show();
+    } catch (caught) {
+      const e = /** @type {FoodError} */ (caught);
+      // The typed code stays on screen so a typo can be corrected instead of retyped.
+      this.setData({ redeeming: false, message: e.message || '开通未成功，请稍后再试。' });
+    }
+  },
+  onManage() { wx.navigateTo({ url: '/pages/admin/admin' }); },
+  /**
+   * Brings favourites in line with the account. On the first run after the upgrade the local copy is
+   * merged up, so nothing saved on this phone is lost; afterwards the server copy is mirrored down.
+   */
+  async syncFavorites() {
+    const local = this._favorites;
+    if (!local) return;
+    try {
+      const remote = await this._account('favorites.list');
+      const pending = local.entries();
+      // Anything this phone holds that the account does not is merged up — including favourites added
+      // while the account was unreachable. Merging is a union, so doing it again costs nothing and
+      // never drops an entry; deciding by `mergedAt` alone would silently discard offline additions.
+      const held = remote.items || {};
+      const unsent = Object.keys(pending).filter(id => !Object.prototype.hasOwnProperty.call(held, id));
+      const merged = unsent.length ? await this._account('favorites.merge', { items: pending }) : remote;
+      const stored = local.replace(merged.items || {});
+      this._cloudFavorites = true;
+      this.setData({ favoriteNotice: '收藏跟着微信账号', favoriteCount: local.ids().length });
+      if (!stored.ok) wx.showToast({ title: stored.message || '本地副本未能保存', icon: 'none' });
+    } catch (caught) {
+      // The local copy is kept exactly as it is, so neither an upgrade nor an outage costs a favourite.
+      const e = /** @type {FoodError} */ (caught);
+      this._cloudFavorites = false;
+      this.setData({ favoriteNotice: '收藏暂时只保存在本机' });
+      wx.showToast({ title: e.code === 'LIMIT_EXCEEDED' ? '收藏太多，整理一些后才能同步' : '收藏暂时只存在这台手机上',
+        icon: 'none' });
+    }
+  },
   /** @param {unknown} caught */
   showError(caught) {
     const e = /** @type {FoodError} */ (caught);
-    if (e.code === 'FORBIDDEN' || e.code === 'UNAUTHENTICATED') {
-      this._requestId++; this._statusRequestId++;
-      this._notes = []; this.setData({ locked: true, boardViews: [], favoriteCards: [], total: 0 });
+    if (['NOT_REGISTERED', 'SUSPENDED', 'UNAUTHENTICATED', 'FORBIDDEN'].includes(e.code || '')) {
+      this.dropAccess(this.accessStateFor(e.code), e.message || '暂时无法读取，请稍后再试。');
+      return;
     }
     this.setData({ message: e.message || '暂时无法读取，请稍后再试。', loading: false, loadingMore: false });
   },
@@ -64,7 +147,7 @@ Page({
       const status = await this._api('status');
       if (statusRequest !== this._statusRequestId) return;
       const labels = /** @type {Record<string,string>} */ ({ pending: '等待首次更新', running: '新选题整理中', complete: '已更新', partial: '本轮部分更新', failed: '本轮更新未完成', budget_exhausted: '本轮已到调用上限' });
-      this.setData({ locked: false, statusLabel: labels[status.status] || '等待更新', message: status.partialReason || '' });
+      this.setData({ statusLabel: labels[status.status] || '等待更新', message: status.partialReason || '' });
       this._newestId = status.snapshotId;
       if (!status.snapshotId) { this.setData({ loading: false }); return; }
       const changed = status.snapshotId !== this._latestId;
@@ -88,7 +171,7 @@ Page({
       if (request !== this._requestId) return false;
       this._notes = append ? [...this._notes, ...result.notes] : result.notes;
       this._currentRoundId = snapshotId;
-      this.setData({ mode, loading: false, loadingMore: false, locked: false, partialReason: result.partialReason || '',
+      this.setData({ mode, loading: false, loadingMore: false, partialReason: result.partialReason || '',
         roundLabel: `${formatTime(result.scheduledAt, true)} 选题`, updatedLabel: `整理于 ${formatTime(result.finishedAt, true)}`,
         coverageNotice: result.coverage?.notice || this.data.coverageNotice, nextCursor: result.nextCursor,
         newAvailable: mode === 'round' ? false : this._newestId !== snapshotId,
@@ -156,11 +239,15 @@ Page({
   async onFavorites() { await this.loadFavorites(); },
   /** @param {boolean} [append] */
   async loadFavorites(append = false) {
+    // Opening the list is when another device's favourite matters, and also the chance to reconnect
+    // after an outage — so try regardless of which mode the page is currently in.
+    if (!append && this.data.access === 'ready') await this.syncFavorites();
     const request = ++this._requestId;
     const ids = this._favorites?.ids() || [];
     if (!append) { this._favoriteOffset = 0; this._notes = []; }
     this.setData({ mode: 'favorites', query: '', loading: !append, loadingMore: append, message: '',
-      roundLabel: '我的选题收藏', updatedLabel: '保存在这台手机上', partialReason: '', missingFavorites: append ? this.data.missingFavorites : [] });
+      roundLabel: '我的选题收藏', updatedLabel: this._cloudFavorites ? '跟着微信账号，换手机也在' : '暂时只存在这台手机上',
+      partialReason: '', missingFavorites: append ? this.data.missingFavorites : [] });
     try {
       const batch = ids.slice(this._favoriteOffset, this._favoriteOffset + 50);
       const result = batch.length ? await this._api('getNotes', { noteIds: batch }) : { notes: [], missing: [] };
@@ -179,16 +266,35 @@ Page({
     else if (this._currentRoundId) await this.loadRound(this._currentRoundId, this.data.mode, true);
   },
   /** @param {{currentTarget:{dataset:Record<string,string>}}} event */
-  onFavorite(event) {
-    const id = event.currentTarget.dataset.id; const result = this._favorites?.toggle(id);
-    if (!result?.ok) { wx.showToast({ title: result?.message || '收藏未能保存', icon: 'none' }); return; }
-    if (this.data.mode === 'favorites' && !result.selected) {
+  async onFavorite(event) {
+    const id = event.currentTarget.dataset.id;
+    let selected;
+    if (this._cloudFavorites) {
+      // The account copy decides. Nothing on screen changes until the server confirms the write.
+      try {
+        selected = (await this._account('favorites.toggle', { noteId: id })).selected;
+        const next = this._favorites?.entries() || {};
+        if (selected) next[id] = Date.now(); else delete next[id];
+        this._favorites?.replace(next);
+      } catch (caught) {
+        const e = /** @type {FoodError} */ (caught);
+        // An access-level refusal must close the content down, exactly as it does on a read.
+        if (['NOT_REGISTERED', 'SUSPENDED', 'UNAUTHENTICATED', 'FORBIDDEN'].includes(e.code || '')) { this.showError(e); return; }
+        wx.showToast({ title: e.message || '收藏未能保存', icon: 'none' });
+        return;
+      }
+    } else {
+      const result = this._favorites?.toggle(id);
+      if (!result?.ok) { wx.showToast({ title: result?.message || '收藏未能保存', icon: 'none' }); return; }
+      selected = result.selected;
+    }
+    if (this.data.mode === 'favorites' && !selected) {
       this._notes = this._notes.filter(x => x.noteId !== id);
       this._favoriteOffset = Math.max(0, this._favoriteOffset - 1);
       this.setData({ missingFavorites: this.data.missingFavorites.filter(x => x !== id) });
     }
     this.renderNotes();
-    wx.showToast({ title: result.selected ? '已收藏' : '已取消收藏', icon: 'none' });
+    wx.showToast({ title: selected ? '已收藏' : '已取消收藏', icon: 'none' });
   },
   /** @param {{currentTarget:{dataset:Record<string,string>}}} event */
   async onCopy(event) {

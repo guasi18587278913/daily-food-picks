@@ -1,7 +1,8 @@
 'use strict';
 
 const COLLECTIONS = Object.freeze(['dfp_state', 'dfp_budgets', 'dfp_rounds', 'dfp_attempts',
-  'dfp_candidates', 'dfp_results', 'dfp_snapshots', 'dfp_parts', 'dfp_notes']);
+  'dfp_candidates', 'dfp_results', 'dfp_snapshots', 'dfp_parts', 'dfp_notes',
+  'dfp_users', 'dfp_invites', 'dfp_favorites', 'dfp_redeem_attempts', 'dfp_access_log']);
 
 function validate(collection, id) {
   if (!COLLECTIONS.includes(collection) || typeof id !== 'string' || !id || id.length > 150 || /[/\u0000-\u001f]/.test(id)) throw new Error('INVALID_DOCUMENT_KEY');

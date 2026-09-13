@@ -24,7 +24,11 @@ for (const [a, b] of [
   ['config/rules.json', 'cloudfunctions/collectTick/config/rules.json'],
   ['config/keywords.json', 'cloudfunctions/collectTick/config/keywords.json'],
   ['cloudfunctions/collectTick/lib/store.js', 'cloudfunctions/catalog/lib/store.js'],
-  ['cloudfunctions/collectTick/lib/context.js', 'cloudfunctions/catalog/lib/context.js']
+  ['cloudfunctions/collectTick/lib/context.js', 'cloudfunctions/catalog/lib/context.js'],
+  ['cloudfunctions/collectTick/lib/store.js', 'cloudfunctions/account/lib/store.js'],
+  ['cloudfunctions/collectTick/lib/context.js', 'cloudfunctions/account/lib/context.js'],
+  ['cloudfunctions/account/lib/users.js', 'cloudfunctions/catalog/lib/users.js'],
+  ['cloudfunctions/account/lib/access.js', 'cloudfunctions/catalog/lib/access.js']
 ]) if (!fs.readFileSync(path.join(root, a)).equals(fs.readFileSync(path.join(root, b)))) throw new Error('Run prepare:functions before deployment; generated code is stale');
 const app = JSON.parse(fs.readFileSync(path.join(mini, 'app.json'), 'utf8'));
 for (const page of app.pages) for (const ext of ['.js', '.json', '.wxml', '.wxss']) {
@@ -34,4 +38,4 @@ const cloud = JSON.parse(fs.readFileSync(path.join(root, 'config/cloudbaserc.exa
 for (const fn of cloud.functions) {
   for (const file of ['index.js', 'package.json']) if (!fs.existsSync(path.join(root, cloud.functionRoot, fn.name, file))) throw new Error('Cloud function directory does not resolve from repository root');
 }
-console.log(JSON.stringify({ checksPassed: 6, checksFailed: 0, clientFiles: count, clientBytes: size, maxBytes: 2 * 1024 * 1024 }));
+console.log(JSON.stringify({ checksPassed: 10, checksFailed: 0, clientFiles: count, clientBytes: size, maxBytes: 2 * 1024 * 1024 }));

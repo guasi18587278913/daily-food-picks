@@ -23,12 +23,18 @@ function decode(cursor, query, numeric = false) {
   } catch { fail('INVALID_CURSOR'); }
 }
 const ERRORS = {
-  UNAUTHENTICATED: '请从微信重新进入。', FORBIDDEN: '当前账号尚未开通试用。',
+  UNAUTHENTICATED: '请从微信重新进入。', NOT_REGISTERED: '这个微信还没有开通，输入邀请码即可使用。',
+  SUSPENDED: '这个账号已停用，请联系管理员。', FORBIDDEN: '当前账号无法读取这些内容。',
   INVALID_ARGUMENT: '请求内容不正确，请重试。', INVALID_CURSOR: '列表已变化，请重新查询。',
   NOT_FOUND: '这轮内容暂不可用。', BACKEND_UNAVAILABLE: '服务暂时不可用，稍后再试。'
 };
 function createCatalog({ store, config, sign = async () => [] }) {
-  async function published(id) { return id && (await store.get('dfp_snapshots', id))?.published === true; }
+  // `seen` is created per invocation and released with it, so a publish during the next call is never masked.
+  async function published(id, seen) {
+    if (!id) return false;
+    if (!seen.has(id)) seen.set(id, (await store.get('dfp_snapshots', id))?.published === true);
+    return seen.get(id);
+  }
   async function decorate(notes) {
     const fileIds = [...new Set(notes.map(n => n.fileId).filter(x => typeof x === 'string' && x.startsWith('cloud://')))];
     let urls = [];
@@ -37,24 +43,28 @@ function createCatalog({ store, config, sign = async () => [] }) {
       .map(x => [x.fileID, x.tempFileURL]));
     return notes.map(note => { const { fileId, ...rest } = note; return { ...rest, thumbUrl: map.get(fileId) || null }; });
   }
-  async function latestNote(noteId) {
+  async function latestNote(noteId, seen) {
     const ref = await store.get('dfp_candidates', `published_${noteId}`);
-    if (!ref || !await published(ref.snapshotId)) return null;
+    if (!ref || !await published(ref.snapshotId, seen)) return null;
     const row = await store.get('dfp_notes', ref.indexId);
     return row?.snapshotId === ref.snapshotId && row.note?.noteId === noteId ? row.note : null;
   }
   return async (event, wxContext) => {
+    const seen = new Map();
     try {
-      authorize(wxContext, config);
+      // The user record is the only source of authorization; a static name list no longer grants anything.
+      // No `mayProvision`: a query must never create or change a permission record as a side effect.
+      await authorize(wxContext, config, store);
       if (!event || typeof event !== 'object') fail('INVALID_ARGUMENT');
       let data;
       if (event.action === 'status') {
         const latest = await store.get('dfp_state', 'latest');
         const state = await store.get('dfp_state', 'status');
+        const available = !!latest && await published(latest.snapshotId, seen);
         data = { status: state?.status || 'pending', roundId: state?.roundId || null,
           scheduledAt: state?.scheduledAt || null, finishedAt: state?.finishedAt || null, partialReason: state?.partialReason || null,
-          revision: latest && await published(latest.snapshotId) ? latest.revision : null,
-          snapshotId: latest && await published(latest.snapshotId) ? latest.snapshotId : null };
+          revision: available ? latest.revision : null,
+          snapshotId: available ? latest.snapshotId : null };
       } else if (event.action === 'listRounds') {
         const limit = limitOf(event.limit, 20, 10); const query = ['rounds'];
         const after = decode(event.cursor, query);
@@ -82,7 +92,7 @@ function createCatalog({ store, config, sign = async () => [] }) {
         if (!Array.isArray(event.noteIds) || event.noteIds.length > 50 || event.noteIds.some(x => typeof x !== 'string' || !NOTE_ID.test(x))) fail('INVALID_ARGUMENT');
         const notes = []; const missing = [];
         for (const noteId of new Set(event.noteIds)) {
-          const note = await latestNote(noteId);
+          const note = await latestNote(noteId, seen);
           if (note) notes.push(note); else missing.push(noteId);
         }
         data = { notes: await decorate(notes), missing };
@@ -96,7 +106,7 @@ function createCatalog({ store, config, sign = async () => [] }) {
           const rows = await store.list('dfp_notes', { descending: true, after, limit: 50, searchTerms: terms });
           for (const row of rows) {
             after = row._id;
-            if (!row.note || !await published(row.snapshotId)) continue;
+            if (!row.note || !await published(row.snapshotId, seen)) continue;
             const current = await store.get('dfp_candidates', `published_${row.note.noteId}`);
             if (current?.indexId !== row._id || !terms.every(t => (row.searchText || '').includes(t))) continue;
             if (notes.length === limit) { more = true; break; }
@@ -109,7 +119,10 @@ function createCatalog({ store, config, sign = async () => [] }) {
       } else fail('INVALID_ARGUMENT');
       return { ok: true, data };
     } catch (e) {
-      const code = Object.hasOwn(ERRORS, e.code) ? e.code : 'BACKEND_UNAVAILABLE';
+      const known = Object.hasOwn(ERRORS, e.code);
+      // Unexpected failures are logged so a platform fault is distinguishable from a refusal.
+      if (!known) console.error(`catalog action ${event && event.action} failed: code=${e && e.code} message=${e && e.message}`);
+      const code = known ? e.code : 'BACKEND_UNAVAILABLE';
       return { ok: false, error: { code, message: ERRORS[code] } };
     }
   };

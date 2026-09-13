@@ -1,0 +1,11 @@
+{
+  "name": "food-picks-account",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.js",
+  "engines": {"node": ">=20.19"},
+  "dependencies": {
+    "@cloudbase/node-sdk": "3.18.3",
+    "wx-server-sdk": "4.0.2"
+  }
+}

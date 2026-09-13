@@ -1,0 +1,72 @@
+<view class="page">
+  <view wx:if="{{!ready}}" class="gate">
+    <text class="gate-mark">食</text>
+    <text class="gate-copy">{{message || '正在确认管理权限…'}}</text>
+  </view>
+
+  <block wx:else>
+    <view class="tabs">
+      <button class="tab {{tab === 'users' ? 'selected' : ''}}" data-tab="users" bindtap="onTab">用户</button>
+      <button class="tab {{tab === 'invites' ? 'selected' : ''}}" data-tab="invites" bindtap="onTab">邀请码</button>
+    </view>
+    <text wx:if="{{message}}" class="notice">{{message}}</text>
+
+    <view wx:if="{{tab === 'users'}}" class="panel">
+      <view wx:if="{{!users.length && !loadingUsers}}" class="empty">还没有已开通的用户。</view>
+      <view wx:for="{{users}}" wx:key="openId" class="row">
+        <view class="row-main">
+          <text class="row-title">{{item.label}}</text>
+          <view class="chips">
+            <text class="chip {{item.isAdmin ? 'strong' : ''}}">{{item.roleLabel}}</text>
+            <text class="chip {{item.suspended ? 'warn' : ''}}">{{item.statusLabel}}</text>
+          </view>
+          <text class="row-meta">{{item.grantedLabel}} 开通 · 来自{{item.originLabel}}</text>
+        </view>
+        <view class="row-actions">
+          <button class="mini" data-id="{{item.openId}}" data-suspended="{{item.suspended}}" bindtap="onToggleStatus"
+            disabled="{{busy}}" loading="{{busy === 'status:' + item.openId}}">{{item.suspended ? '恢复' : '停用'}}</button>
+          <button class="mini" data-id="{{item.openId}}" data-admin="{{item.isAdmin}}" bindtap="onToggleRole"
+            disabled="{{busy}}" loading="{{busy === 'role:' + item.openId}}">{{item.isAdmin ? '降为成员' : '设为管理员'}}</button>
+        </view>
+      </view>
+      <button wx:if="{{usersCursor}}" class="more" bindtap="onMoreUsers" loading="{{loadingUsers}}">看更多用户</button>
+    </view>
+
+    <view wx:else class="panel">
+      <view class="form">
+        <text class="form-title">生成新的邀请码</text>
+        <view class="field"><text class="field-label">可用次数</text>
+          <input class="field-input" type="number" value="{{form.maxUses}}" bindinput="onUsesInput" /></view>
+        <view class="field"><text class="field-label">有效天数</text>
+          <input class="field-input" type="number" value="{{form.expiresInDays}}" bindinput="onDaysInput" /></view>
+        <view class="field"><text class="field-label">备注</text>
+          <input class="field-input" value="{{form.note}}" bindinput="onNoteInput" placeholder="发给谁，选填" maxlength="50" /></view>
+        <button class="primary" bindtap="onCreateInvite" disabled="{{busy}}" loading="{{busy === 'create'}}">生成邀请码</button>
+      </view>
+
+      <view wx:if="{{created}}" class="created">
+        <text class="created-label">新邀请码</text>
+        <text class="created-code">{{created.display}}</text>
+        <text class="created-meta">{{created.expiryLabel}}</text>
+        <button class="mini" bindtap="onCopyCode">复制</button>
+      </view>
+
+      <view wx:if="{{!invites.length && !loadingInvites}}" class="empty">还没有生成过邀请码。</view>
+      <view wx:for="{{invites}}" wx:key="code" class="row">
+        <view class="row-main">
+          <text class="row-title mono">{{item.display}}</text>
+          <view class="chips">
+            <text class="chip {{item.usable ? '' : 'warn'}}">{{item.stateLabel}}</text>
+            <text class="chip">已用 {{item.usageLabel}}</text>
+          </view>
+          <text class="row-meta">{{item.expiryLabel}}{{item.note ? ' · ' + item.note : ''}}</text>
+        </view>
+        <view class="row-actions">
+          <button wx:if="{{item.usable}}" class="mini" data-code="{{item.code}}" bindtap="onRevoke"
+            disabled="{{busy}}" loading="{{busy === 'revoke:' + item.code}}">停用</button>
+        </view>
+      </view>
+      <button wx:if="{{invitesCursor}}" class="more" bindtap="onMoreInvites" loading="{{loadingInvites}}">看更多邀请码</button>
+    </view>
+  </block>
+</view>

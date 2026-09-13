@@ -1,5 +1,8 @@
 {
-  "pages": ["pages/index/index"],
+  "pages": [
+    "pages/index/index",
+    "pages/admin/admin"
+  ],
   "window": {
     "navigationBarTitleText": "深夜食堂选题台",
     "navigationBarBackgroundColor": "#f7f3eb",

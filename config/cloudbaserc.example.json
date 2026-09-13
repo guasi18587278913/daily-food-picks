@@ -31,6 +31,20 @@
       "memorySize": 256,
       "envVariables": {
         "DFP_APP_ID": "wx8a2388888683b769",
+        "DFP_MIGRATION_FALLBACK": "false",
+        "DFP_ALLOWED_OPENIDS": ""
+      }
+    },
+    {
+      "name": "account",
+      "runtime": "Nodejs20.19",
+      "handler": "index.main",
+      "timeout": 30,
+      "memorySize": 256,
+      "envVariables": {
+        "DFP_APP_ID": "wx8a2388888683b769",
+        "DFP_BOOTSTRAP_ADMIN_OPENID": "",
+        "DFP_MIGRATION_FALLBACK": "false",
         "DFP_ALLOWED_OPENIDS": ""
       }
     }

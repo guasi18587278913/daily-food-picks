@@ -17,6 +17,22 @@ function createFavorites(storage) {
     corrupt,
     /** @param {string} id */ has(id) { return Object.prototype.hasOwnProperty.call(values, id); },
     ids() { return Object.keys(values).sort((a, b) => values[b] - values[a] || a.localeCompare(b)); },
+    /** The local copy, used as the source for a one-time merge into the account. */
+    entries() { return { ...values }; },
+    count() { return Object.keys(values).length; },
+    /**
+     * Replaces the local copy with what the server holds. The server is authoritative once merged,
+     * so this mirrors rather than merges; a storage failure is reported, not hidden.
+     * @param {Record<string,number>} incoming
+     */
+    replace(incoming) {
+      const next = /** @type {Record<string,number>} */ ({});
+      for (const [key, value] of Object.entries(incoming || {})) {
+        if (ID.test(key) && Number.isSafeInteger(value) && value > 0) next[key] = value;
+      }
+      try { storage.set(next); values = next; return { ok: true, message: '' }; }
+      catch { values = next; return { ok: false, message: '收藏已同步，但这台手机没能存下本地副本。' }; }
+    },
     /** @param {string} id */ toggle(id) {
       if (!ID.test(id)) return { ok: false, message: '收藏编号无效。' };
       const next = { ...values }; if (Object.prototype.hasOwnProperty.call(next, id)) delete next[id]; else next[id] = Date.now();
