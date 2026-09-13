@@ -144,15 +144,34 @@ test('a read-only caller never creates a permission record as a side effect', as
   // The catalog calls authorize on every query. A query that writes a permission record would both
   // change state from a read path and, if it were ever given the bootstrap setting, mint an administrator.
   const config = { ...base, bootstrapAdminOpenId: 'owner', migrationFallback: true, fallbackOpenIds: ['legacy-1'] };
-  for (const openId of ['owner', 'legacy-1']) {
-    const store = new MemoryStore();
-    await rejects(authorize(ctx(openId), config, store, { now: NOW }), 'NOT_REGISTERED');
-    assert.equal(await store.get('dfp_users', openId), null, `${openId} must not get a record from a read path`);
-  }
-  // Once the account function has created the record, the read-only caller accepts it normally.
   const store = new MemoryStore();
+  const listed = await authorize(ctx('legacy-1'), config, store, { now: NOW });
+  assert.equal(listed.role, 'member');
+  assert.equal(await store.get('dfp_users', 'legacy-1'), null, 'a read path must not write a record');
+
+  // The bootstrap setting grants nothing through a read-only caller: an administrator can only be
+  // minted where records are actually written.
+  await rejects(authorize(ctx('owner'), { ...config, fallbackOpenIds: [] }, new MemoryStore(), { now: NOW }), 'NOT_REGISTERED');
+
+  // Once the account function has created the record, the read-only caller reads it normally.
   await authorize(ctx('legacy-1'), config, store, { now: NOW, mayProvision: true });
+  assert.equal((await store.get('dfp_users', 'legacy-1')).grantedVia, 'migration');
   assert.equal((await authorize(ctx('legacy-1'), config, store, { now: NOW })).role, 'member');
+});
+
+test('deploying the migration window does not sign existing users out of the read path', async () => {
+  // The regression this covers: gating the fallback on `mayProvision` refused every listed identity
+  // that had no record yet, so an existing user would lose access the moment this change shipped.
+  const open = { ...base, migrationFallback: true, fallbackOpenIds: ['legacy-1', 'legacy-2'] };
+  for (const openId of ['legacy-1', 'legacy-2']) {
+    const granted = await authorize(ctx(openId), open, new MemoryStore(), { now: NOW });
+    assert.equal(granted.status, 'active');
+    assert.equal(granted.role, 'member');
+  }
+  // Outside the list, and once the window closes, the read path refuses as before.
+  await rejects(authorize(ctx('outsider'), open, new MemoryStore(), { now: NOW }), 'NOT_REGISTERED');
+  const closed = { ...open, migrationFallback: false };
+  await rejects(authorize(ctx('legacy-1'), closed, new MemoryStore(), { now: NOW }), 'NOT_REGISTERED');
 });
 
 test('an unexpected create failure surfaces instead of looking like a lost race', async () => {

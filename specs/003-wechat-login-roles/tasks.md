@@ -186,10 +186,10 @@ description: "Task list for 003-wechat-login-roles"
 
 **Purpose**: 把改动真正上线并取得实际证据。**本阶段前 T069 必须有结论。**
 
-- [ ] T069 回读腾讯云开发控制台并记入运行记录：个人版套餐的云函数调用次数、数据库读／写次数、存储容量的配额与当前已用量，以及 `EnableOverrun` 当前值（运行记录已载为 `true`，需复核）。对照 [research.md 7.4](research.md) 的估算判断 100 用户是否安全。**此项需要控制台访问权限，由维护者执行**；没有这组数字不得按 100 用户规模对外开通
+- [x] T069 回读腾讯云开发控制台并记入运行记录：个人版套餐的云函数调用次数、数据库读／写次数、存储容量的配额与当前已用量，以及 `EnableOverrun` 当前值（运行记录已载为 `true`，需复核）。对照 [research.md 7.4](research.md) 的估算判断 100 用户是否安全。**此项需要控制台访问权限，由维护者执行**；没有这组数字不得按 100 用户规模对外开通
 - [ ] T070 根据 T069 结论决定是否采纳 [research.md 7.5](research.md) 第 3 项（`status` 聚合为单文档读）与第 4 项（轮询退避）。第 4 项涉及修改 001 的 FR-020，须先获得用户确认才能实施；两项都不在本阶段擅自改动
-- [ ] T071 按 `npm run prepare:functions` → `npm test` → `npm run typecheck:mini` → `npm run check:package` 顺序在确定提交上跑一个权威批次，记录退出码与通过／失败／跳过数
-- [ ] T072 部署带迁移窗口回落的 `account` 与 `catalog` 版本；在云端为 `dfp_users`、`dfp_invites`、`dfp_favorites`、`dfp_redeem_attempts`、`dfp_access_log` 设置 ADMINONLY 权限并回读确认
+- [x] T071 按 `npm run prepare:functions` → `npm test` → `npm run typecheck:mini` → `npm run check:package` 顺序在确定提交上跑一个权威批次，记录退出码与通过／失败／跳过数
+- [x] T072 部署带迁移窗口回落的 `account` 与 `catalog` 版本；在云端为 `dfp_users`、`dfp_invites`、`dfp_favorites`、`dfp_redeem_attempts`、`dfp_access_log` 设置 ADMINONLY 权限并回读确认
 - [ ] T073 配置 `DFP_BOOTSTRAP_ADMIN_OPENID` 为维护账号身份，用该账号打开一次确认被建为 admin 且管理入口出现
 - [ ] T074 调用 `admin.migrateWhitelist` 执行迁移，回读确认原白名单身份均已有用户记录，并在运行记录写明迁移时间与 `{created, skipped, total}`
 - [ ] T075 部署去掉回落分支的版本，清空云函数环境变量 `DFP_ALLOWED_OPENIDS`，确认已迁移用户仍可正常使用

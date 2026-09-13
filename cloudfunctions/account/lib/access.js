@@ -67,7 +67,18 @@ async function authorize(wxContext, config, store, { now = Date.now(), mayProvis
     : config.migrationFallback && config.fallbackOpenIds.includes(openId)
       ? { role: 'member', grantedVia: 'migration', at: now }
       : null;
-  if (!origin || !mayProvision) return fail('NOT_REGISTERED');
+  if (!origin) return fail('NOT_REGISTERED');
+
+  // `mayProvision` decides whether a record may be *written*, not whether access is granted:
+  // during the migration window a listed identity must keep working through the read-only caller too,
+  // or deploying this change would sign existing users out (spec FR-026).
+  //
+  // A read-only caller is still never handed an administrator role — that is what the bootstrap
+  // setting would otherwise grant, and minting an administrator from a query must stay impossible.
+  if (!mayProvision) {
+    if (origin.grantedVia !== 'migration') return fail('NOT_REGISTERED');
+    return { openId, role: 'member', status: 'active', record: newUser({ ...origin, actor: openId }) };
+  }
   return granted(await provision(store, openId, origin), openId) || fail('NOT_REGISTERED');
 }
 
