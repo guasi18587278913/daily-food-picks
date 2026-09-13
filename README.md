@@ -56,4 +56,14 @@ npm run typecheck:mini
 
 这些命令不代表云端部署或真机验收。不要通过运行历史试跑脚本、清预算或调高额度来验证目录。
 
+## 正式发布
+
+小程序在微信后台点击发布之后，回到仓库执行一次，把这个上线版本记进 GitHub：
+
+```bash
+npm run release -- 1.0.0 --note="本次改动一句话"
+```
+
+命令会校验仓库状态、跑交付检查、打 tag 并创建 GitHub Release。它不上传代码也不部署云函数，只负责让"线上跑的是哪份代码"可查。详见[发布与版本记录](docs/operations/发布与版本记录.md)。
+
 完整资料导航见 [docs/README.md](docs/README.md)。

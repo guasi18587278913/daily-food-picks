@@ -10,6 +10,7 @@
 ## 运行与维护
 
 - [微信试用版运行记录](operations/wechat-trial-runbook.md)：真实部署、取数、额度和剩余验收。
+- [发布与版本记录](operations/发布与版本记录.md)：正式发布怎么打 tag，线上版本怎么查。
 - [目录整合记录](operations/project-organization.md)：迁移去向、验证、备份和兼容入口。
 - [账号进度摘要](../specs/001-wechat-member-trial/enrollment-status.md)：可共享的账号准备状态。
 
