@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR:-.}/scripts/check-sync.js\" 2>/dev/null || true",
+            "timeout": 20,
+            "statusMessage": "检查仓库同步状态"
+          }
+        ]
+      }
+    ]
+  }
+}

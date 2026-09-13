@@ -64,6 +64,8 @@ npm run typecheck:mini
 npm run release -- 1.0.0 --note="本次改动一句话"
 ```
 
-命令会校验仓库状态、跑交付检查、打 tag 并创建 GitHub Release。它不上传代码也不部署云函数，只负责让"线上跑的是哪份代码"可查。详见[发布与版本记录](docs/operations/发布与版本记录.md)。
+命令会校验仓库状态、跑交付检查、打 tag 并创建 GitHub Release。它不上传代码也不部署云函数，只负责让"线上跑的是哪份代码"可查。
+
+日常提交后当前分支会自动推到 GitHub，保证远程不落后于本地。钩子不随仓库分发，换机器后用 `npm install` 或 `node scripts/install-hooks.js` 重装。详见[发布与版本记录](docs/operations/发布与版本记录.md)。
 
 完整资料导航见 [docs/README.md](docs/README.md)。
