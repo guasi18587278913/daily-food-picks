@@ -21,3 +21,20 @@ cloudfunctions/collectTick/config/
 cloudfunctions/catalog/lib/store.js
 cloudfunctions/catalog/lib/context.js
 output/
+
+# Unified workspace private and historical inputs
+CLAUDE.local.md
+.claude/settings.local.json
+.specify/feature.json
+.specify/integrations/.cache/
+.specify/memory/.constitution-template.json
+docs/archive/collection-research/采集验证/
+docs/archive/collection-research/参考资料/
+.playwright-mcp/
+output/
+specs/**/account-resource-status.json
+
+# Preserved original workspace ignore rules
+
+# Local credentials
+.env.local
