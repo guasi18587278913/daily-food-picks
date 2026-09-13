@@ -93,7 +93,7 @@ function validateParams(kind, params) {
       || !Number.isInteger(params.page) || params.page < 1 || params.page > 20
       || !['popularity_descending', 'time_descending'].includes(params.sort_type)
       || !['一天内', '一周内'].includes(params.time_filter)
-      || !['视频笔记', '普通笔记'].includes(params.note_type)) throw error('INVALID_PARAMETERS');
+      || !['视频笔记', '普通笔记', '不限'].includes(params.note_type)) throw error('INVALID_PARAMETERS');
   } else if (!ID.test(params.user_id || params.note_id || '')) throw error('INVALID_PARAMETERS');
   if (Object.values(params).some(v => !['string', 'number'].includes(typeof v) || String(v).length > 500)) throw error('INVALID_PARAMETERS');
 }
@@ -139,7 +139,8 @@ class Provider {
     if (JSON.stringify(params).includes(this.key)) throw error('INVALID_PARAMETERS');
     const requestKey = `${kind}:${digest(Object.fromEntries(Object.entries(params).sort()))}`;
     for (let attempt = 1; attempt <= 2; attempt++) {
-      if (this.sent >= 5) throw error('TICK_LIMIT');
+      // The runner stops claiming work at 105 s, so ten serial requests (about 4 s each for searches) fit one tick.
+      if (this.sent >= 10) throw error('TICK_LIMIT');
       const record = await reserveAttempt(this.store, { roundId: this.round.id, requestKey, kind, attempt,
         now: this.clock(), lease: this.lease, price: this.price, validation: this.round.validation,
         limits: { ...this.config, roundCalls: this.round.roundCalls } });

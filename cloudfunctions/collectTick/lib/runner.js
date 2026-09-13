@@ -2,20 +2,30 @@
 
 const { randomUUID } = require('node:crypto');
 const { claimLease, releaseLease, assertLease, validatePrice } = require('./budget');
-const { scheduledRound, error } = require('./config');
+const { scheduledRound, sweepWindow, error } = require('./config');
 const { Provider, verifyPrice } = require('./provider');
 const { eligibleBoards, historyBaseline, inWindow } = require('./ranking');
 const { judgeNote } = require('./judge');
-const { publish, previouslyPublished, storeCover } = require('./publisher');
+const { publish, previouslyPublished, readSnapshot, storeCover } = require('./publisher');
 const KEYWORDS = require('../config/keywords.json');
 const RULES = require('../config/rules.json');
 
 function searches(round) {
+  if (round.kind === 'sweep') {
+    const sweep = KEYWORDS.dailySweep;
+    return sweep.keywords.map(keyword => ({ keyword, note_type: sweep.noteType, page: 1,
+      sort_type: 'popularity_descending', time_filter: sweep.timeFilter, source: 'explore_feed', ai_mode: 0 }));
+  }
   const day = Math.floor(round.scheduledAt / 86400000);
   const slot = [9, 12, 20].indexOf(new Date(round.scheduledAt + 8 * 3600000).getUTCHours());
   const group = KEYWORDS.groups[(day * 3 + Math.max(0, slot)) % KEYWORDS.groups.length];
   return group.flatMap(keyword => KEYWORDS.noteTypes.map(note_type => ({ keyword, note_type, page: 1,
     sort_type: 'popularity_descending', time_filter: '一周内', source: 'explore_feed', ai_mode: 0 })));
+}
+// The 06:00 sweep only admits today candidates; week and dark candidates keep coming from the regular rounds.
+function admitsCandidate(round, note) {
+  const boards = eligibleBoards(note, round.scheduledAt, { allowUnknownFans: true });
+  return round.kind === 'sweep' ? boards.includes('today') : boards.length > 0;
 }
 function prioritizeCandidates(rows) {
   const score = row => {
@@ -55,29 +65,63 @@ const REASONS = {
   ROUND_BUDGET: '本轮数据调用额度已用完，保留已完成的选题。', DAILY_BUDGET: '今日数据调用额度已用完，保留已完成的选题。',
   VALIDATION_BUDGET: '首次验证额度已用完，保留已完成的选题。', WINDOW_ENDED: '本轮更新窗口已结束，部分候选尚未完成。',
   MODEL_UNAVAILABLE: '内容判断服务暂不可用，保留已完成的选题。', PROVIDER_AUTH: '数据服务授权异常，本轮已停止。',
-  CANDIDATE_CAP: '本轮候选较多，按限定范围完成了一部分。', REQUEST_FAILED: '部分数据请求失败，保留已完成的选题。'
+  CANDIDATE_CAP: '本轮候选较多，按限定范围完成了一部分。', REQUEST_FAILED: '部分数据请求失败，保留已完成的选题。',
+  AI_CALL_CAP: '本轮内容判断次数已达上限，保留已完成的选题。',
+  SWEEP_UNAVAILABLE: '今天 06:00 的今日新锐没有更新成功，本轮只展示新找到的选题。',
+  CARRY_UNAVAILABLE: '今天 06:00 的今日新锐读取失败，本轮只展示新找到的选题。'
 };
+function describeGaps(gaps) {
+  return gaps.map(x => REASONS[x] || REASONS.REQUEST_FAILED).filter((v, i, a) => a.indexOf(v) === i).join(' ');
+}
+// Today picks refresh once at 06:00. Later rounds that day show the same notes again, with any week board they also
+// earned, without recommending them again. A missing, unpublished or unreadable sweep is reported, never shown as empty.
+async function sameDaySweepPicks(store, round) {
+  const sweep = sweepWindow(round.scheduledAt);
+  if (round.kind === 'sweep' || !round.sweepEnabled || round.scheduledAt < sweep.closesAt) return { notes: [], summary: null };
+  let record = null;
+  const unavailable = errorCode => ({ notes: [], summary: { snapshotId: record?.snapshotId ?? null, count: 0, errorCode } });
+  try {
+    record = await store.get('dfp_rounds', sweep.id);
+    if (!record) return unavailable('SWEEP_MISSING');
+    if (!record.snapshotId) return unavailable('SWEEP_NOT_PUBLISHED');
+    const notes = (await readSnapshot(store, record.snapshotId)).notes.filter(note => note.boards?.includes('today'));
+    return { notes, summary: { snapshotId: record.snapshotId, count: notes.length } };
+  } catch (e) {
+    // This round's own picks must still publish; the degraded carry is recorded and marks the round partial.
+    return unavailable(['NOT_FOUND', 'CORRUPT_SNAPSHOT'].includes(e.code) ? e.code : 'CARRY_READ_FAILED');
+  }
+}
 async function conclude({ store, lease, round, progress, reason, clock }) {
   const rows = await candidateRows(store, round.id);
   const notes = rows.filter(x => x.stage === 'done' && x.note.boards?.length).map(x => x.note);
-  const gaps = [...new Set([...(progress.gaps || []), ...(reason ? [reason] : [])])];
-  const partialReason = gaps.map(x => REASONS[x] || REASONS.REQUEST_FAILED).filter((v, i, a) => a.indexOf(v) === i).join(' ');
+  // Reaching the window end is not a coverage gap when every search and candidate had already finished.
+  const workFinished = Array.isArray(progress.candidateIds) && (progress.candidateIndex || 0) >= progress.candidateIds.length;
+  const reasonGaps = !reason || (reason === 'WINDOW_ENDED' && workFinished) ? [] : [reason];
+  const gaps = [...new Set([...(progress.gaps || []), ...reasonGaps])];
   const coverage = { keywords: searches(round).map(x => x.keyword).filter((v, i, a) => a.indexOf(v) === i),
     pagesPerQuery: 1, successfulSearches: progress.successfulSearches, candidateCount: progress.candidateIds?.length || rows.length,
-    processed: progress.candidateIndex || 0, gaps, notice: KEYWORDS.coverageNotice, ruleVersion: RULES.version };
+    processed: progress.candidateIndex || 0, gaps, notice: round.kind === 'sweep' ? KEYWORDS.dailySweep.coverageNotice : KEYWORDS.coverageNotice,
+    ruleVersion: RULES.version };
   if (!notes.length && (gaps.length || !progress.successfulSearches)) {
     const status = finishStatus(reason);
     await store.transaction(async tx => {
       await assertLease(tx, lease, clock());
       const current = await tx.get('dfp_rounds', round.id);
-      const update = { status, finishedAt: new Date(clock()).toISOString(), partialReason: partialReason || REASONS.REQUEST_FAILED, coverage };
+      const update = { status, finishedAt: new Date(clock()).toISOString(), partialReason: describeGaps(gaps) || REASONS.REQUEST_FAILED, coverage };
       await tx.put('dfp_rounds', round.id, { ...current, ...update });
       await tx.put('dfp_state', 'status', { ...update, roundId: round.id, scheduledAt: new Date(round.scheduledAt).toISOString() });
     });
     return { roundId: round.id, status, reason: reason || 'REQUEST_FAILED' };
   }
-  const result = await publish({ store, lease, round, notes, status: gaps.length ? 'partial' : 'complete',
-    coverage, partialReason, successfulSearches: progress.successfulSearches, clock });
+  const carried = await sameDaySweepPicks(store, round);
+  const carryError = carried.summary?.errorCode;
+  // A failed read of the 06:00 picks is retried by later ticks in this window; only the window end publishes without them.
+  if (carryError === 'CARRY_READ_FAILED' && !reason && clock() < round.closesAt - 10000) return { roundId: round.id, status: 'running' };
+  const carryGaps = !carryError ? [] : [['SWEEP_MISSING', 'SWEEP_NOT_PUBLISHED'].includes(carryError) ? 'SWEEP_UNAVAILABLE' : 'CARRY_UNAVAILABLE'];
+  const publishedGaps = [...gaps, ...carryGaps];
+  const result = await publish({ store, lease, round, notes, carriedNotes: carried.notes, status: publishedGaps.length ? 'partial' : 'complete',
+    coverage: { ...coverage, gaps: publishedGaps, carriedToday: carried.summary }, partialReason: describeGaps(publishedGaps),
+    successfulSearches: progress.successfulSearches, clock });
   return { roundId: round.id, status: result.status, snapshotId: result.id };
 }
 
@@ -122,7 +166,7 @@ async function runTick({ store, config, key, generate, upload, clock = Date.now,
         try {
           const result = await provider.request('search', queries[progress.searchIndex]);
           for (const note of await provider.notes(result)) {
-            if (!eligibleBoards(note, round.scheduledAt, { allowUnknownFans: true }).length || await previouslyPublished(store, note.noteId)) continue;
+            if (!admitsCandidate(round, note) || await previouslyPublished(store, note.noteId)) continue;
             const docId = `${round.id}_${note.noteId}`;
             if (!await store.get('dfp_candidates', docId)) await store.put('dfp_candidates', docId, { roundId: round.id, stage: 'detail', note });
           }
@@ -155,9 +199,13 @@ async function runTick({ store, config, key, generate, upload, clock = Date.now,
           const full = (await provider.notes(result)).find(x => x.noteId === noteId);
           if (!full || full.authorId !== row.note.authorId) throw error('DETAIL_MISMATCH');
           row.note = { ...row.note, ...full, fans: full.fans ?? row.note.fans };
-          row.stage = 'judge'; await save();
+          // The sweep only publishes today picks: a detail that moves a note out of the today window ends its inspection.
+          if (round.kind === 'sweep' && !eligibleBoards(row.note, round.scheduledAt).includes('today')) {
+            row.stage = 'skipped'; row.skipReason = 'outside_today_after_detail';
+          } else row.stage = 'judge';
+          await save();
         } else if (row.stage === 'judge') {
-          if (progress.aiCalls >= config.maxAiCallsPerRound) throw error('MODEL_UNAVAILABLE');
+          if (progress.aiCalls >= config.maxAiCallsPerRound) throw error('AI_CALL_CAP');
           row.stage = 'judging'; await save();
           progress.aiCalls++; await saveProgress(store, lease, round.id, progress, clock);
           row.note.judgment = await judgeNote(row.note, generate);
@@ -199,7 +247,7 @@ async function runTick({ store, config, key, generate, upload, clock = Date.now,
           progress.candidateIndex++; await saveProgress(store, lease, round.id, progress, clock);
         } else throw error('INVALID_STAGE');
       } catch (e) {
-        if (['TICK_LIMIT', 'DAILY_BUDGET', 'ROUND_BUDGET', 'VALIDATION_BUDGET', 'PROVIDER_AUTH', 'LEASE_EXPIRED', 'MODEL_UNAVAILABLE'].includes(e.code)) throw e;
+        if (['TICK_LIMIT', 'DAILY_BUDGET', 'ROUND_BUDGET', 'VALIDATION_BUDGET', 'PROVIDER_AUTH', 'LEASE_EXPIRED', 'MODEL_UNAVAILABLE', 'AI_CALL_CAP'].includes(e.code)) throw e;
         row.stage = 'skipped'; row.errorCode = 'REQUEST_FAILED'; await save();
         progress.gaps.push('REQUEST_FAILED');
         progress.candidateIndex++; await saveProgress(store, lease, round.id, progress, clock);

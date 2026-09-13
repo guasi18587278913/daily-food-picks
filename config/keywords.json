@@ -1,6 +1,6 @@
 {
-  "version": "2026-09-12-budgeted-core",
-  "selection": "Rotate one two-keyword group per round; query video and image notes from the past week, then enforce the 24-hour, five-day and seven-day windows locally.",
+  "version": "2026-09-13-daily-sweep-55",
+  "selection": "Regular rounds (09/12/20) rotate one two-keyword group; query video and image notes from the past week, then enforce the 24-hour, five-day and seven-day windows locally.",
   "groups": [
     ["美食教程", "家常菜"],
     ["烘焙", "面食"],
@@ -9,5 +9,14 @@
   ],
   "pagesPerQuery": 1,
   "noteTypes": ["视频笔记", "普通笔记"],
-  "coverageNotice": "基于当轮关键词与页数发现选题，未覆盖小红书全部内容。"
+  "coverageNotice": "基于当轮关键词与页数发现选题，未覆盖小红书全部内容。",
+  "dailySweep": {
+    "selection": "Once a day at 06:00 Beijing time, search the first page of every keyword for notes of any type from the past day, sorted by popularity. Results only feed the today board.",
+    "source": "Keywords of the old site's 2026-09-10 11:00 today-board run; in two recorded runs no 1,000-like note appeared after page 1.",
+    "keywords": ["美食教程", "教你做道拿手菜", "家常菜", "下饭菜", "面食", "在家做甜品", "我的烘焙日常", "减脂餐", "家宴做给自己人", "自制甜品", "宝宝辅食", "美食制作", "好吃下饭菜", "家常菜教程", "空气炸锅美食", "纯手工月饼", "甜品烘焙秘方", "花样面食", "在家做面食", "湘菜", "川菜", "粤菜", "潮汕家常菜", "红烧肉", "糖醋排骨", "早餐饼", "二人食", "上班族带饭", "今天晚餐长这样", "不重样宝宝食谱", "在家做美食", "家常快手菜", "自制包子", "新手烘焙", "月子餐食谱", "小学生早餐", "东北菜", "一人食吃什么", "电饭锅美食", "无需烤箱做甜品", "烤箱美食", "减脂餐教程", "快手早餐", "懒人食谱", "小吃教程", "烘焙配方", "家庭烘焙", "凉拌菜", "汤羹", "主食", "卤味", "腌制", "烧烤", "火锅底料", "自制饮品"],
+    "pagesPerQuery": 1,
+    "noteType": "不限",
+    "timeFilter": "一天内",
+    "coverageNotice": "今日新锐来自每天 06:00 的 55 个关键词搜索，未覆盖小红书全部内容。"
+  }
 }

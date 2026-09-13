@@ -1,5 +1,5 @@
 {
   "timezone": "Asia/Shanghai",
-  "trigger": { "name": "food-picks-timer", "type": "timer", "config": "0 0-20/2 9,12,20 * * * *" },
-  "note": "Minute 20 only finalizes the window. Collection itself is allowed only during the first 20 minutes."
+  "trigger": { "name": "food-picks-timer", "type": "timer", "config": "0 0-30/2 6,9,12,20 * * * *" },
+  "note": "06:00 is the daily today-board sweep: it collects during minutes 0-28 and minute 30 only finalizes. 09/12/20 collect during minutes 0-18, minute 20 only finalizes, and minutes 22-30 exit immediately."
 }

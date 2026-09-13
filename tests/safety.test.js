@@ -12,7 +12,9 @@ test('missing approval, stale price, or an excessive budget cannot reserve a req
   const base = { roundId: '20260912-0900', requestKey: 'search-a', kind: 'search', attempt: 1, now: NOW, lease, limits: LIMITS, price: PRICE };
   for (const patch of [
     { limits: { ...LIMITS, dailyCalls: null } },
-    { limits: { ...LIMITS, dailyCalls: 51 } },
+    { limits: { ...LIMITS, dailyCalls: 151 } },
+    { limits: { ...LIMITS, dailyMicroUsd: 1500001 } },
+    { limits: { ...LIMITS, roundCalls: 101 } },
     { price: { ...PRICE, expiresAt: NOW - 1 } },
     { price: { ...PRICE, microUsd: 20000 } }
   ]) await assert.rejects(() => reserveAttempt(store, { ...base, ...patch }));
