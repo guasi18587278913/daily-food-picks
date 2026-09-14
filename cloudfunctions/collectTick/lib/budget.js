@@ -12,9 +12,11 @@ function shanghaiDay(now) {
   return new Date(now + 8 * 3600000).toISOString().slice(0, 10);
 }
 function integer(value, min, max) { return Number.isSafeInteger(value) && value >= min && value <= max; }
-// Hard ceilings from the 2026-09-13 approval: 150 calls / 1.50 USD a day, at most 100 calls in one (06:00 sweep) round.
+// Expansion requires an explicit server tier; old configurations retain their original ceilings.
 function validateLimits(limits) {
-  if (!limits || !integer(limits.dailyCalls, 1, 150) || !integer(limits.dailyMicroUsd, 1, 1500000)
+  const expanded = limits?.budgetTier === 'expanded250';
+  if (!limits || ![undefined, 'legacy150', 'expanded250'].includes(limits.budgetTier)
+    || !integer(limits.dailyCalls, 1, expanded ? 250 : 150) || !integer(limits.dailyMicroUsd, 1, expanded ? 2500000 : 1500000)
     || !integer(limits.roundCalls, 1, 100) || !integer(limits.validationCalls, 1, 20)
     || !integer(limits.validationMicroUsd, 1, 200000)) fail('INVALID_BUDGET');
 }
@@ -81,21 +83,27 @@ async function reserveAttempt(store, request) {
     const adaptive = round.definition?.discoveryMode === 'adaptive';
     const discoveryCalls = round.discoveryCalls || 0;
     if (adaptive) {
-      const ceiling = round.definition.kind === 'sweep' ? 18 : 4;
+      const ceiling = round.definition.kind === 'sweep' ? 18 : round.definition.budgetTier === 'expanded250' ? 8 : 4;
       if (!integer(round.definition.discoveryLimit, 1, ceiling) || !integer(discoveryCalls, 0, ceiling)) fail('INVALID_BUDGET');
       if (purpose === 'discovery' && discoveryCalls + 1 > round.definition.discoveryLimit) fail('DISCOVERY_BUDGET');
     }
     const daily = await tx.get('dfp_budgets', day) || { calls: 0, microUsd: 0 };
     const trial = validation ? (await tx.get('dfp_budgets', 'initial-validation') || { calls: 0, microUsd: 0 }) : null;
-    if (daily.calls + 1 > limits.dailyCalls || daily.microUsd + price.microUsd > limits.dailyMicroUsd) fail('DAILY_BUDGET');
+    const expanded = limits.budgetTier === 'expanded250';
+    const extraCalls = expanded ? daily.additionalResearchCalls ?? 0 : 0;
+    const extraMoney = expanded ? daily.additionalResearchMicroUsd ?? 0 : 0;
+    if (!integer(extraCalls, 0, Number.MAX_SAFE_INTEGER) || !integer(extraMoney, 0, Number.MAX_SAFE_INTEGER)) fail('INVALID_BUDGET');
+    // The newly authorized daily ceiling includes today's separately recorded research spend.
+    const usedCalls = daily.calls + extraCalls, usedMoney = daily.microUsd + extraMoney;
+    if (usedCalls + 1 > limits.dailyCalls || usedMoney + price.microUsd > limits.dailyMicroUsd) fail('DAILY_BUDGET');
     if (round.definition?.supplement === true) {
       const kept = round.definition.reservedRegularCalls;
-      if (!integer(kept, 0, 50)) fail('INVALID_BUDGET');
-      if (daily.calls + 1 + kept > limits.dailyCalls
-        || daily.microUsd + (1 + kept) * price.microUsd > limits.dailyMicroUsd) fail('SUPPLEMENT_BUDGET');
+      if (!integer(kept, 0, expanded ? 150 : 50)) fail('INVALID_BUDGET');
+      if (usedCalls + 1 + kept > limits.dailyCalls
+        || usedMoney + (1 + kept) * price.microUsd > limits.dailyMicroUsd) fail('SUPPLEMENT_BUDGET');
     }
-    // Only the 06:00 sweep may use up to 100 calls; every other round keeps the original 20-call ceiling.
-    const roundCeiling = round.definition?.kind === 'sweep' ? 100 : 20;
+    const roundCeiling = round.definition?.kind === 'sweep' ? 100
+      : expanded && round.definition?.budgetTier === 'expanded250' ? 50 : 20;
     if ((round.calls || 0) + 1 > Math.min(limits.roundCalls, roundCeiling)) fail('ROUND_BUDGET');
     if (trial && (trial.calls + 1 > limits.validationCalls || trial.microUsd + price.microUsd > limits.validationMicroUsd)) fail('VALIDATION_BUDGET');
     const record = {

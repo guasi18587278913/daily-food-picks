@@ -155,7 +155,8 @@ class Discovery {
   async step(provider) {
     const state = this.progress.discovery;
     if (state.done) return false;
-    if (state.index >= state.jobs.length || (this.ids.size >= POLICY.candidateTarget[this.round.kind] && state.freshContent > 0)) {
+    const target = this.round.candidateTarget || POLICY.candidateTarget[this.round.kind];
+    if (state.index >= state.jobs.length || (this.ids.size >= target && state.freshContent > 0)) {
       state.done = true; state.stopReason = state.index >= state.jobs.length ? 'exhausted' : 'candidate_target'; return false;
     }
     const job = state.jobs[state.index];

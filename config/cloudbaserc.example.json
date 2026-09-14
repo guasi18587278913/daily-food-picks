@@ -13,6 +13,7 @@
         "DFP_ENABLED": "false",
         "DFP_TIMER_SECRET": "",
         "DFP_APP_ID": "wx8a2388888683b769",
+        "DFP_BUDGET_TIER": "legacy150",
         "DFP_DAILY_CALLS": "",
         "DFP_DAILY_MICRO_USD": "",
         "DFP_SWEEP_CALLS": "",

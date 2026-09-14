@@ -52,15 +52,19 @@ function validateSupplement(config, env) {
   }
 }
 function loadConfig(env = process.env) {
+  const budgetTier = env.DFP_BUDGET_TIER || 'legacy150';
+  if (!['legacy150', 'expanded250'].includes(budgetTier)) throw error('CONFIGURATION_INCOMPLETE');
+  const expanded = budgetTier === 'expanded250';
   const config = {
+    budgetTier,
     enabled: env.DFP_ENABLED === 'true',
     appId: env.DFP_APP_ID || 'wx8a2388888683b769',
     envId: env.DFP_ENV_ID || 'food-picks-trial-d5elis0ecfcb5d2',
-    dailyCalls: number(env.DFP_DAILY_CALLS, 150), dailyMicroUsd: number(env.DFP_DAILY_MICRO_USD, 1500000),
+    dailyCalls: number(env.DFP_DAILY_CALLS, expanded ? 250 : 150), dailyMicroUsd: number(env.DFP_DAILY_MICRO_USD, expanded ? 2500000 : 1500000),
     sweepCalls: number(env.DFP_SWEEP_CALLS, 100),
     validationCalls: number(env.DFP_VALIDATION_CALLS, 20), validationMicroUsd: number(env.DFP_VALIDATION_MICRO_USD, 200000),
     validationAt: env.DFP_VALIDATION_AT || null,
-    supplementAt: env.DFP_SUPPLEMENT_AT || null, supplementCalls: number(env.DFP_SUPPLEMENT_CALLS, 20),
+    supplementAt: env.DFP_SUPPLEMENT_AT || null, supplementCalls: number(env.DFP_SUPPLEMENT_CALLS, expanded ? 50 : 20),
     timerSecret: env.DFP_TIMER_SECRET || '',
     freeAiConfirmed: env.DFP_FREE_AI_CONFIRMED === 'true',
     aiProvider: env.DFP_AI_PROVIDER || 'hunyuan-v3', aiModel: env.DFP_AI_MODEL || 'hy3',
@@ -81,7 +85,7 @@ function loadConfig(env = process.env) {
   // money cap too small for the approved calls stops loading instead of silently reshaping the day.
   const regularDailyCalls = config.dailyCalls - (config.sweepCalls || 0);
   if (config.enabled && ((env.DFP_SWEEP_CALLS && !config.sweepCalls) || regularDailyCalls < REGULAR_HOURS.length
-    || regularDailyCalls > MAX_REGULAR_DAILY_CALLS || config.dailyMicroUsd < config.dailyCalls * PRICE_MICRO_USD)) throw error('CONFIGURATION_INCOMPLETE');
+    || regularDailyCalls > (expanded ? 150 : MAX_REGULAR_DAILY_CALLS) || config.dailyMicroUsd < config.dailyCalls * PRICE_MICRO_USD)) throw error('CONFIGURATION_INCOMPLETE');
   if (config.enabled && !/^[a-f0-9]{64}$/.test(config.timerSecret)) throw error('CONFIGURATION_INCOMPLETE');
   if (config.validationAt && (!validInstant(config.validationAt)
     || overlapsScheduledWindow(Date.parse(config.validationAt), config))) throw error('INVALID_VALIDATION_TIME');
@@ -136,7 +140,9 @@ function scheduledRound(now, config) {
   const reservedRegularCalls = supplement ? REGULAR_HOURS.filter(h => h > hour).reduce((sum, h) => sum + allocationFor(h), 0) : 0;
   return { id, day: shanghaiDay(start), scheduledAt: start, closesAt: start + windowMinutes * 60000, validation, kind,
     sweepEnabled: Boolean(config.sweepCalls), roundCalls, ...(supplement ? { supplement: true, reservedRegularCalls } : {}),
-    ...(config.discoveryMode === 'adaptive' ? { discoveryMode: 'adaptive', discoveryLimit: kind === 'sweep' ? 18 : 4,
+    ...(config.budgetTier === 'expanded250' ? { budgetTier: 'expanded250' } : {}),
+    ...(config.discoveryMode === 'adaptive' ? { discoveryMode: 'adaptive', discoveryLimit: kind === 'sweep' ? 18 : config.budgetTier === 'expanded250' ? 8 : 4,
+      ...(config.budgetTier === 'expanded250' && kind === 'regular' ? { candidateTarget: 20 } : {}),
       visionEnabled: config.vision?.enabled === true, ...(config.vision?.enabled ? { visionRoundCalls: config.vision.roundCalls } : {}) } : {}) };
 }
 
