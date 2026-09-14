@@ -1,8 +1,11 @@
 # Feature Specification: 查看原笔记
 
-**Feature Branch**: `feature/note-navigation`  
-**Created**: 2026-09-14  
-**Status**: 进展见tasks.md  
+**Feature Branch**: `feature/note-navigation`
+
+**Created**: 2026-09-14
+
+**Status**: 进展见tasks.md
+
 **Input**: 用户要求处理选题台跳转链接，已真机确认官方小程序短链接可打开一篇视频正文。
 
 ## User Scenarios & Testing
