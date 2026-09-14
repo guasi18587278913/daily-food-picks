@@ -42,8 +42,11 @@ function parseJudgment(raw, note) {
     return { verdict: result.verdict, evidence: result.evidence, evidenceSource, reason: null };
   } catch { return uncertain; }
 }
+function needsTextModel(note) {
+  return completeText(note) && !!(note.desc.trim() || (note.type === 'video' && note.title.trim()));
+}
 async function judgeNote(note, generate) {
-  if (!completeText(note) || (!note.desc.trim() && (note.type !== 'video' || !note.title.trim()))) {
+  if (!needsTextModel(note)) {
     return { verdict: 'uncertain', evidence: '', reason: 'incomplete_body' };
   }
   const messages = [
@@ -55,7 +58,14 @@ async function judgeNote(note, generate) {
     { role: 'user', content: JSON.stringify({ type: note.type, title: note.title, desc: note.desc }) }
   ];
   try { return { ...parseJudgment(await generate(messages), note), inputHash: digest([note.type, note.title, note.desc]) }; }
-  catch { return { verdict: 'error', evidence: '', reason: 'model_unavailable' }; }
+  catch (error) {
+    const status = error?.status ?? error?.statusCode;
+    const category = /timeout|timed out|超时/i.test(String(error?.message || '')) || error?.name === 'AbortError'
+      ? 'timeout' : status === 401 || status === 403 ? 'authorization' : status === 429 ? 'rate_limit' : 'service';
+    // Persist categories and HTTP status only; SDK errors can contain credentials or input text.
+    return { verdict: 'error', evidence: '', reason: 'model_unavailable',
+      diagnostics: { category, httpStatus: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null } };
+  }
 }
 function freeModelGenerator(app) {
   return async messages => {
@@ -65,4 +75,4 @@ function freeModelGenerator(app) {
   };
 }
 
-module.exports = { parseJudgment, judgeNote, freeModelGenerator };
+module.exports = { parseJudgment, judgeNote, freeModelGenerator, needsTextModel };

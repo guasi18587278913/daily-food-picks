@@ -2,7 +2,6 @@
 const { createApi, createPoller, shouldFollowLatest } = require('../../lib/api');
 const { createFavorites } = require('../../lib/favorites');
 const { boards, card, formatTime } = require('../../lib/view');
-const { canOpenOriginal, openOriginal } = require('../../lib/source');
 const STORAGE_KEY = 'food-picks:favorites:v2';
 const LEGACY_STORAGE_KEY = 'food-picks:favorites:v1';
 
@@ -37,7 +36,7 @@ Page({
   _syncingFavoriteIds: /** @type {string[]} */ ([]),
   _returnMode: 'round',
   _visible: false,
-  _sourceOpening: false,
+  _contentOpening: false,
   onLoad() {
     this._favorites = createFavorites({ get: () => {
       const current = wx.getStorageSync(STORAGE_KEY);
@@ -330,21 +329,22 @@ Page({
     wx.showToast({ title: selected ? '已收藏' : '已取消收藏', icon: 'none' });
   },
   /** @param {{currentTarget:{dataset:Record<string,string>}}} event */
-  async onOpenSource(event) {
-    if (this._sourceOpening) return;
+  onViewContent(event) {
+    if (this._contentOpening) return;
     const note = this._notes.find(x => x.noteId === event.currentTarget.dataset.id);
-    if (!note) { wx.showToast({ title: '这条选题已更新，请刷新后重试。', icon: 'none' }); return; }
-    this._sourceOpening = true;
+    if (!note || !/^[a-f0-9]{24}$/.test(note.noteId)) {
+      wx.showToast({ title: '这条选题已更新，请刷新后重试。', icon: 'none' }); return;
+    }
+    this._contentOpening = true;
     try {
-      if (!canOpenOriginal(note)) throw new Error('SOURCE_LINK_UNAVAILABLE');
-      // A successful request does not prove the destination displayed its contents. Do not show a false success toast.
-      await openOriginal(note, options => wx.navigateToMiniProgram(options));
-    } catch {
-      wx.showToast({ title: '原文暂不可直达，请稍后再试。', icon: 'none' });
-    } finally { this._sourceOpening = false; }
+      wx.navigateTo({ url: `/pages/detail/detail?noteId=${note.noteId}`,
+        fail: () => wx.showToast({ title: '内容页暂未打开，请重试。', icon: 'none' }),
+        complete: () => { this._contentOpening = false; } });
+    } catch { this._contentOpening = false; wx.showToast({ title: '内容页暂未打开，请重试。', icon: 'none' }); }
   },
   /** @param {{currentTarget:{dataset:Record<string,string>}}} event */
   onImageError(event) {
-    this._notes = this._notes.map(x => x.noteId === event.currentTarget.dataset.id ? { ...x, thumbUrl: null } : x); this.renderNotes();
+    this._notes = this._notes.map(x => x.noteId === event.currentTarget.dataset.id
+      ? { ...x, thumbUrl: x.thumbFallbackUrl !== x.thumbUrl ? x.thumbFallbackUrl || null : null } : x); this.renderNotes();
   }
 });

@@ -1,6 +1,6 @@
 <template name="noteCard">
   <view class="note-card">
-    <view class="note-main">
+    <view class="note-main" data-id="{{note.noteId}}" bindtap="onViewContent" role="button" aria-label="查看选题内容">
       <view class="cover">
         <image wx:if="{{note.thumbUrl}}" class="cover-image" src="{{note.thumbUrl}}" mode="aspectFill" lazy-load data-id="{{note.noteId}}" binderror="onImageError" />
         <view wx:else class="cover-placeholder"><text class="icon icon-image"></text><text>暂无封面</text></view>
@@ -16,8 +16,7 @@
     <view class="card-actions">
       <button class="favorite {{note.favorite ? 'saved' : ''}}" data-id="{{note.noteId}}" bindtap="onFavorite" aria-label="{{note.favorite ? '取消收藏' : '收藏选题'}}"><view class="favorite-pill"><text class="icon {{note.favorite ? 'icon-star-filled' : 'icon-star'}}"></text><text>{{note.favorite ? '已收藏' : '收藏'}}</text></view></button>
       <view class="source-actions">
-        <button wx:if="{{note.canOpenSource}}" class="source" data-id="{{note.noteId}}" bindtap="onOpenSource" aria-label="查看原笔记"><text class="icon icon-arrow"></text><text>查看原笔记</text></button>
-        <text wx:else class="source-unavailable">原文暂不可直达</text>
+        <button class="source" data-id="{{note.noteId}}" bindtap="onViewContent" aria-label="查看内容"><text class="icon icon-arrow"></text><text>查看内容</text></button>
       </view>
     </view>
   </view>

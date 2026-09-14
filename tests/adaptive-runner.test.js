@@ -75,3 +75,59 @@ test('optional judgment-cache write failure preserves accepted content and repor
  const result=await runTick(x.deps);const snapshot=await x.store.get('dfp_snapshots',result.snapshotId);
  assert.equal(snapshot?.boards.week,1);assert.equal(result.status,'partial');assert.ok(snapshot.coverage.gaps.includes('CACHE_UNAVAILABLE'));
 });
+
+test('a text model outage can still publish independently verified video results', async () => {
+ const x=setup(); x.deps.generate=async()=>{throw Object.assign(new Error('timeout'),{code:'ETIMEDOUT'});};
+ await x.store.put('dfp_state','latest',{snapshotId:'old'});
+ const result=await runTick(x.deps);
+ assert.equal(result.status,'partial');
+ const snapshot=await x.store.get('dfp_snapshots',result.snapshotId);
+ assert.equal(snapshot.boards.week,1);assert.ok(snapshot.coverage.gaps.includes('MODEL_UNAVAILABLE'));
+ const row=await x.store.get('dfp_candidates',`20260912-0900_${id(1)}`);
+ assert.equal(row.note.textJudgment.verdict,'error');assert.equal(row.note.judgment.verdict,'cooking');
+ assert.equal(x.counts().visualCalls,1);
+});
+test('two consecutive text failures stop new text calls, while eligible videos still use bounded vision',async()=>{
+ const x=setup({items:[raw(1),raw(2),raw(3)]});let textCalls=0;
+ x.deps.generate=async()=>{textCalls++;throw Error('service unavailable');};
+ const result=await runTick(x.deps);
+ assert.equal(result.status,'partial');assert.equal(textCalls,2);assert.equal(x.counts().visualCalls,3);
+ const round=await x.store.get('dfp_rounds','20260912-0900');assert.equal(round.progress.aiCalls,2);
+ assert.equal((await x.store.get('dfp_snapshots',result.snapshotId)).count,3);
+});
+test('text failures with vision disabled preserve the old snapshot and never classify unknown content as rejected',async()=>{
+ const x=setup({items:[raw(1),raw(2),raw(3)]});let textCalls=0;
+ x.deps.config={...base,vision:{...base.vision,enabled:false}};
+ x.deps.generate=async()=>{textCalls++;throw Error('service unavailable');};
+ await x.store.put('dfp_state','latest',{snapshotId:'old'});
+ const result=await runTick(x.deps);assert.equal(result.status,'failed');assert.equal(textCalls,2);
+ assert.equal((await x.store.get('dfp_state','latest')).snapshotId,'old');assert.equal(x.counts().visualCalls,0);
+ const rows=await x.store.list('dfp_candidates',{filters:{roundId:'20260912-0900'}});
+ assert.ok(rows.every(x=>x.outcome==='incomplete'));
+});
+test('local incomplete-body decisions do not spend text calls or reset a failed model circuit',async()=>{
+ const x=setup({items:[raw(1),raw(2,{desc:undefined}),raw(3),raw(4,{desc:undefined}),raw(5)]});let textCalls=0;
+ x.deps.generate=async()=>{textCalls++;throw Error('service unavailable');};
+ await runTick(x.deps);assert.equal(textCalls,2);
+ const round=await x.store.get('dfp_rounds','20260912-0900');assert.equal(round.progress.aiCalls,2);assert.equal(round.progress.textFailureStreak,2);
+});
+test('an interrupted second text failure stays counted after recovery', async () => {
+ const x=setup({items:[raw(1),raw(2),raw(3)]});x.deps.config={...base,vision:{...base.vision,enabled:false}};
+ let calls=0;x.deps.generate=async()=>{calls++;throw Error('timeout');};
+ const transact=x.store.transaction.bind(x.store);let interrupt=true;
+ x.store.transaction=fn=>transact(async tx=>{const put=tx.put.bind(tx);tx.put=async(collection,key,value)=>{
+  if(interrupt&&collection==='dfp_rounds'&&value.progress?.textFailureStreak===2){interrupt=false;throw Object.assign(Error('simulated interruption'),{code:'LEASE_EXPIRED'});}return put(collection,key,value);};return fn(tx);});
+ await assert.rejects(()=>runTick(x.deps),e=>e.code==='LEASE_EXPIRED');await runTick(x.deps);
+ assert.equal(calls,2);const round=await x.store.get('dfp_rounds','20260912-0900');assert.equal(round.progress.textFailureStreak,2);
+ await runTick(x.deps);assert.equal(calls,2);
+});
+test('a crash after text reservation is counted conservatively once and never replayed',async()=>{
+ const x=setup({items:[raw(1),raw(2),raw(3)]});x.deps.config={...base,vision:{...base.vision,enabled:false}};
+ let calls=0;x.deps.generate=async()=>{calls++;throw Error('timeout');};
+ const transact=x.store.transaction.bind(x.store);let interrupt=true;
+ x.store.transaction=async fn=>{const result=await transact(fn);const r=await x.store.get('dfp_rounds','20260912-0900');
+  if(interrupt&&r?.progress?.aiCalls===1){const rows=await x.store.list('dfp_candidates',{filters:{roundId:'20260912-0900'}});if(rows.some(r=>r.stage==='judging'&&r.textCallReserved)){interrupt=false;throw Object.assign(Error('simulated interruption'),{code:'LEASE_EXPIRED'});}}return result;};
+ await assert.rejects(()=>runTick(x.deps),e=>e.code==='LEASE_EXPIRED');assert.equal(calls,0);
+ await runTick(x.deps);assert.equal(calls,1);const r=await x.store.get('dfp_rounds','20260912-0900');assert.equal(r.progress.aiCalls,2);assert.equal(r.progress.textFailureStreak,2);
+ await runTick(x.deps);assert.equal(calls,1);
+});

@@ -15,6 +15,7 @@ interface FoodNote {
   baseline: number | null;
   boards: BoardKey[];
   thumbUrl: string | null;
+  thumbFallbackUrl?: string | null;
   sourceUrl: string | null;
   sourceNavigation?: { noteId: string; shortLink: string } | null;
   sourceNavigationState?: 'ready' | 'missing' | 'unavailable';
@@ -26,3 +27,13 @@ interface RoundData {
   coverage?: { notice?: string };
 }
 interface FoodError extends Error { code?: string }
+interface NoteContent {
+  status: 'available' | 'missing';
+  desc: string;
+  bodyComplete: boolean;
+  images: string[];
+  imageCount: number | null;
+  imagesComplete: boolean;
+  videoUrl: string | null;
+  capturedAt: string | null;
+}

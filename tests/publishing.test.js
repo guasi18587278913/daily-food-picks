@@ -98,3 +98,13 @@ test('a mislabeled non-image is never stored or cached as a cover', async () => 
     assert.equal(uploads, 0);
   }
 });
+
+test('cover failures retain safe diagnostics and a cache outage cannot discard an uploaded image',async()=>{
+ const note={coverUrl:'https://sns-i11.rednotecdn.com/image?sign=private-value'};const issues=[];const bytes=Buffer.from([0xff,0xd8,0xff,0xe0,1,2,3]);
+ const store=new MemoryStore();
+ const failed=await storeCover({store,note,upload:async()=>{throw Error('must not upload');},fetcher:async()=>new Response('denied',{status:403}),report:x=>issues.push(x)});
+ assert.equal(failed,null);assert.deepEqual(issues,[{code:'COVER_HTTP_ERROR',httpStatus:403}]);assert.equal(JSON.stringify(issues).includes('private-value'),false);
+ const broken={get:async()=>{throw Error('db read failed');},put:async()=>{throw Error('db write failed');}};
+ const saved=await storeCover({store:broken,note,fetcher:async()=>new Response(bytes,{headers:{'content-type':'image/jpeg'}}),upload:async()=>({fileID:'cloud://saved-cover'}),report:x=>issues.push(x)});
+ assert.equal(saved,'cloud://saved-cover');assert.ok(issues.some(x=>x.code==='COVER_CACHE_READ_FAILED'));assert.ok(issues.some(x=>x.code==='COVER_CACHE_WRITE_FAILED'));
+});

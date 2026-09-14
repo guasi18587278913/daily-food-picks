@@ -113,3 +113,12 @@ test('schedule allocates 17/17/16 and cannot start after the twenty minute windo
 });
 
 module.exports = { ID, candidate, history };
+
+test('detail capture preserves bounded validated images and never claims a truncated gallery is complete',()=>{
+ const {normalizeNote}=require('../cloudfunctions/collectTick/lib/provider');
+ const raw={id:'1'.repeat(24),user:{userid:'2'.repeat(24)},type:'normal',title:'蒸蛋',desc:'加水蒸熟',images_list:[{url:'https://sns-img.xhscdn.com/first.jpg'},{original:'http://sns-i11.rednotecdn.com/second.jpg'}]};
+ const n=normalizeNote(raw,{source:'detail'});assert.deepEqual(n.images,['https://sns-img.xhscdn.com/first.jpg','https://sns-i11.rednotecdn.com/second.jpg']);assert.equal(n.imageCount,2);assert.equal(n.imagesComplete,true);
+ assert.equal(normalizeNote(raw,{source:'search'}).imagesComplete,false);
+ const many=normalizeNote({...raw,images_list:Array.from({length:21},(_,i)=>({url:'https://sns-img.xhscdn.com/'+i+'.jpg'}))},{source:'detail'});assert.equal(many.images.length,20);assert.equal(many.imageCount,21);assert.equal(many.imagesComplete,false);
+ const bad=normalizeNote({...raw,images_list:[...raw.images_list,{url:'https://evil.example/track'}]},{source:'detail'});assert.equal(bad.images.length,2);assert.equal(bad.imagesComplete,false);
+});

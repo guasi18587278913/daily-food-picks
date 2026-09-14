@@ -5,7 +5,7 @@ const { claimLease, releaseLease, assertLease, validatePrice } = require('./budg
 const { scheduledRound, sweepWindow, error } = require('./config');
 const { Provider, verifyPrice } = require('./provider');
 const { eligibleBoards, historyBaseline, inWindow } = require('./ranking');
-const { judgeNote } = require('./judge');
+const { judgeNote, needsTextModel } = require('./judge');
 const { publish, previouslyPublished, readSnapshot, storeCover } = require('./publisher');
 const KEYWORDS = require('../config/keywords.json');
 const RULES = require('../config/rules.json');
@@ -79,6 +79,7 @@ async function candidateRows(store, roundId) {
 }
 function finishStatus(reason) { return /BUDGET/.test(reason || '') ? 'budget_exhausted' : 'failed'; }
 const REASONS = {
+  COVER_UNAVAILABLE: '部分封面暂未保存，正文仍可查看。',
   ROUND_BUDGET: '本轮数据调用额度已用完，保留已完成的选题。', DAILY_BUDGET: '今日数据调用额度已用完，保留已完成的选题。',
   VALIDATION_BUDGET: '首次验证额度已用完，保留已完成的选题。', WINDOW_ENDED: '本轮更新窗口已结束，部分候选尚未完成。',
   MODEL_UNAVAILABLE: '内容判断服务暂不可用，保留已完成的选题。', PROVIDER_AUTH: '数据服务授权异常，本轮已停止。',
@@ -138,7 +139,8 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
   }
   // A rejected query does not erase completed searches. Total provider failure or an unavailable
   // classifier still retains the old snapshot; partial discovery can publish an honest zero result.
-  const serviceFailed = ['PROVIDER_AUTH', 'MODEL_UNAVAILABLE', 'VISION_UNAVAILABLE'].includes(reason) || gaps.includes('VISION_UNAVAILABLE');
+  const serviceFailed = ['PROVIDER_AUTH', 'MODEL_UNAVAILABLE', 'VISION_UNAVAILABLE'].includes(reason)
+    || gaps.includes('VISION_UNAVAILABLE') || gaps.includes('MODEL_UNAVAILABLE');
   if (!notes.length && (!progress.successfulSearches || serviceFailed)) {
     const status = finishStatus(reason);
     await store.transaction(async tx => {
@@ -242,8 +244,12 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
       const docId = `${round.id}_${noteId}`;
       const row = await store.get('dfp_candidates', docId);
       if (!row) throw error('MISSING_CANDIDATE');
-      const save = () => store.transaction(async tx => {
-        await assertLease(tx, lease, clock()); await tx.put('dfp_candidates', docId, row);
+      const save = (withProgress = false) => store.transaction(async tx => {
+        await assertLease(tx, lease, clock());
+        const current = withProgress ? await tx.get('dfp_rounds', round.id) : null;
+        if (withProgress && current?.status !== 'running') throw error('ROUND_NOT_RUNNING');
+        await tx.put('dfp_candidates', docId, row);
+        if (withProgress) await tx.put('dfp_rounds', round.id, { ...current, progress });
       });
       try {
         if (row.stage === 'detail') {
@@ -266,24 +272,36 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
         } else if (row.stage === 'judge') {
           const cached = adaptive ? await cachedJudgment(store, row.note, 'text', clock(), warning => progress.gaps.push(warning)) : null;
           if (cached) { row.note.judgment = cached; progress.judgmentCacheHits = (progress.judgmentCacheHits || 0) + 1; }
+          else if (adaptive && (progress.textFailureStreak || 0) >= 2) {
+            row.note.judgment = { verdict: 'error', evidence: '', reason: 'model_circuit_open' };
+          }
           else {
-            if (progress.aiCalls >= config.maxAiCallsPerRound) throw error('AI_CALL_CAP');
-            row.stage = 'judging'; await save();
-            progress.aiCalls++; await saveProgress(store, lease, round.id, progress, clock);
+            const callsModel = needsTextModel(row.note);
+            if (callsModel && progress.aiCalls >= config.maxAiCallsPerRound) throw error('AI_CALL_CAP');
+            row.stage = 'judging'; row.textCallReserved = callsModel;
+            if (callsModel) progress.aiCalls++;
+            await save(true);
             row.note.judgment = await judgeNote(row.note, generate);
+            row.textCallReserved = false;
+            if (callsModel) progress.textFailureStreak = row.note.judgment.verdict === 'error' ? (progress.textFailureStreak || 0) + 1 : 0;
             if (adaptive) {
               const warning = await cacheJudgment(store, lease, row.note, 'text', row.note.judgment, clock());
               if (warning) progress.gaps.push(warning);
             }
           }
-          if (row.note.judgment.verdict === 'error') throw error('MODEL_UNAVAILABLE');
+          if (row.note.judgment.verdict === 'error') {
+            if (!adaptive) throw error('MODEL_UNAVAILABLE');
+            progress.gaps.push('MODEL_UNAVAILABLE');
+            if (row.note.judgment.diagnostics) console.error(JSON.stringify({ event: 'text_model_failed',
+              roundId: round.id, noteId, ...row.note.judgment.diagnostics }));
+          }
           row.note.textJudgment = row.note.judgment;
           const visual = adaptive && round.visionEnabled && config.vision?.enabled && row.note.type === 'video'
-            && row.note.judgment.verdict === 'uncertain' && admitsCandidate(round, row.note);
+            && ['uncertain', 'error'].includes(row.note.judgment.verdict) && admitsCandidate(round, row.note);
           row.stage = row.note.judgment.verdict === 'cooking' ? 'history' : visual ? 'visual' : 'skipped';
           if (row.stage === 'skipped') row.outcome = row.note.judgment.verdict === 'not_cooking' ? 'rejected_content' : 'incomplete';
           if (discovery && row.stage === 'history') await discovery.rememberCooking(row.note);
-          await save(); await saveProgress(store, lease, round.id, progress, clock);
+          await save(true);
         } else if (row.stage === 'visual') {
           // Download, decode and model each have their own deadlines; start only with room for the full chain.
           if (clock() >= Math.min(deadline, round.closesAt) - 100000) break;
@@ -306,9 +324,15 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           await save(); await saveProgress(store, lease, round.id, progress, clock);
         } else if (row.stage === 'judging') {
           // A crashed model call is never silently replayed.
-          row.stage = 'skipped'; row.note.judgment = { verdict: 'uncertain', evidence: '', reason: 'interrupted_model' };
+          const unknownCall = row.textCallReserved !== false;
+          if (adaptive && unknownCall) progress.textFailureStreak = (progress.textFailureStreak || 0) + 1;
+          row.textCallReserved = false;
+          row.note.judgment = { verdict: 'error', evidence: '', reason: 'interrupted_model' };
+          row.note.textJudgment = row.note.judgment;
+          row.stage = adaptive && round.visionEnabled && config.vision?.enabled && row.note.type === 'video'
+            && admitsCandidate(round, row.note) ? 'visual' : 'skipped';
           row.outcome = 'incomplete';
-          progress.gaps.push('REQUEST_FAILED'); await save();
+          progress.gaps.push(adaptive && unknownCall ? 'MODEL_UNAVAILABLE' : 'REQUEST_FAILED'); await save(true);
         } else if (row.stage === 'history') {
           if (eligibleBoards(row.note, round.scheduledAt).includes('today')) {
             const cacheId = `history_${round.id}_${row.note.authorId}`;
@@ -335,9 +359,11 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           row.note.fanRatio = Number.isSafeInteger(row.note.fans) && row.note.fans > 0 ? Math.round(row.note.likes / row.note.fans * 10) / 10 : null;
           row.stage = 'cover'; await save();
         } else if (row.stage === 'cover') {
-          row.note.fileId = upload ? await storeCover({ store, upload, note: row.note }) : null;
+          row.note.fileId = upload ? await storeCover({ store, upload, note: row.note,
+            report: issue => { row.coverIssue = issue; } }) : null;
+          if (!row.note.fileId && row.note.coverUrl) progress.gaps.push('COVER_UNAVAILABLE');
           row.stage = row.note.boards.length ? 'done' : 'skipped';
-          row.outcome = row.note.boards.length ? 'accepted' : 'rejected_metrics'; await save();
+          row.outcome = row.note.boards.length ? 'accepted' : 'rejected_metrics'; await save(true);
         } else if (['done', 'skipped'].includes(row.stage)) {
           progress.candidateIndex++; await saveProgress(store, lease, round.id, progress, clock);
         } else throw error('INVALID_STAGE');

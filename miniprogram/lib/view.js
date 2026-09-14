@@ -32,8 +32,8 @@ function card(note, board, sort, favorite) {
   const comparison = board === 'today' ? (note.baseline !== null && note.baseline > 0 ? `作者前 7 篇中位数 ${formatMetric(note.baseline)} 赞` : '作者参照不足，暂不计算倍数')
     : board === 'dark' ? `采集时 ${formatMetric(note.fans)} 粉丝` : `${formatMetric(note.collected)} 收藏 · ${formatMetric(note.comments)} 评论`;
   const canOpenSource = canOpenOriginal(note);
-  return { ...note, canOpenSource, sourceActionLabel: canOpenSource ? '查看原笔记' : '原文暂不可直达',
-    displayTitle: note.title || '打开原文看做法', big: formatMetric(big), unit, comparison,
+  return { ...note, canOpenSource, sourceActionLabel: '查看内容',
+    displayTitle: note.title || '未提供标题 · 点开查看内容', big: formatMetric(big), unit, comparison,
     publishedLabel: formatTime(note.publishedAt), typeLabel: note.type === 'video' ? '视频' : '图文', favorite };
 }
 /** @param {FoodNote[]} notes @param {Record<string,string>} sorts @param {(id:string)=>boolean} hasFavorite */

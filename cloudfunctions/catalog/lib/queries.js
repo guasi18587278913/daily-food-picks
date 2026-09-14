@@ -1,4 +1,5 @@
 'use strict';
+const { capturedNote, contentFor, sourceMediaUrl } = require('./content');
 const { createHash } = require('node:crypto');
 const { authorize } = require('./access');
 const { validRegistry, navigationFor } = require('./source-navigation');
@@ -36,22 +37,31 @@ function createCatalog({ store, config, sign = async () => [], clock = Date.now 
     if (!seen.has(id)) seen.set(id, (await store.get('dfp_snapshots', id))?.published === true);
     return seen.get(id);
   }
-  async function decorate(notes) {
+  async function decorate(notes, captures = new Map()) {
     if (!notes.length) return [];
     let registry = null, registryState = 'missing';
     try {
       registry = await store.get('dfp_state', 'source_navigation_v1');
       if (registry) registryState = validRegistry(registry, clock()) ? 'ready' : 'unavailable';
     } catch { registryState = 'unavailable'; }
-    const fileIds = [...new Set(notes.map(n => n.fileId).filter(x => typeof x === 'string' && x.startsWith('cloud://')))];
+    const sources = await Promise.all(notes.map(async note => {
+      let capture = captures.get(note.noteId);
+      if (!sourceMediaUrl(note.coverUrl) && !captures.has(note.noteId)) {
+        try { capture = await capturedNote(store, note); } catch { capture = null; }
+      }
+      return { fileId: note.fileId || capture?.fileId, coverUrl: sourceMediaUrl(note.coverUrl) || sourceMediaUrl(capture?.coverUrl) };
+    }));
+    const fileIds = [...new Set(sources.map(n => n.fileId).filter(x => typeof x === 'string' && x.startsWith('cloud://')))];
     let urls = [];
     try { if (fileIds.length) urls = await sign(fileIds); } catch {}
     const map = new Map(urls.filter(x => fileIds.includes(x.fileID) && /^https:\/\//.test(x.tempFileURL || '') && (!x.status || x.status === 0))
       .map(x => [x.fileID, x.tempFileURL]));
-    return notes.map(note => {
-      const { fileId, ...rest } = note;
+    return notes.map((note, index) => {
+      const { fileId, coverUrl, ...rest } = note;
+      const source = sources[index];
       const navigation = registryState === 'ready' ? navigationFor(registry, note.noteId, clock()) : null;
-      return { ...rest, thumbUrl: map.get(fileId) || null, sourceNavigation: navigation,
+      return { ...rest, thumbUrl: map.get(source.fileId) || source.coverUrl || null,
+        thumbFallbackUrl: source.coverUrl || null, sourceNavigation: navigation,
         sourceNavigationState: navigation ? 'ready' : registryState === 'unavailable' ? 'unavailable' : 'missing' };
     });
   }
@@ -100,6 +110,13 @@ function createCatalog({ store, config, sign = async () => [], clock = Date.now 
           status: snapshot.status, partialReason: snapshot.partialReason, coverage: snapshot.coverage,
           count: snapshot.count, boards: snapshot.boards, notes: await decorate(notes.slice(offset, offset + limit)),
           nextCursor: offset + limit < notes.length ? encode(query, offset + limit) : null };
+      } else if (event.action === 'getContent') {
+        if (typeof event.noteId !== 'string' || !NOTE_ID.test(event.noteId)) fail('INVALID_ARGUMENT');
+        const note = await latestNote(event.noteId, seen);
+        if (!note) fail('NOT_FOUND');
+        const captured = await capturedNote(store, note);
+        const [decorated] = await decorate([note], new Map([[note.noteId, captured]]));
+        data = { note: decorated, content: contentFor(captured) };
       } else if (event.action === 'getNotes') {
         if (!Array.isArray(event.noteIds) || event.noteIds.length > 50 || event.noteIds.some(x => typeof x !== 'string' || !NOTE_ID.test(x))) fail('INVALID_ARGUMENT');
         const notes = []; const missing = [];

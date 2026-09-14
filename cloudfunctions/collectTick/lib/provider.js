@@ -116,7 +116,12 @@ function normalizeNote(raw, { source = 'search', fetchedAt = Date.now(), authorI
   const pinned = raw.sticky ?? raw.is_top;
   const sticky = typeof pinned === 'boolean' ? pinned : ([0, 1].includes(pinned) ? pinned === 1 : null);
   const cover = raw.images_list?.[0] || raw.cover || {};
-  const image = imageUrl(cover.url_default || cover.url || cover.url_size_large || cover.info_list?.[0]?.url);
+  const imageOf = item => imageUrl(item?.url_default || item?.url || item?.url_size_large || item?.original || item?.info_list?.[0]?.url);
+  const image = imageOf(cover);
+  const rawImages = Array.isArray(raw.images_list) ? raw.images_list : [];
+  const images = [...new Set(rawImages.slice(0, 20).map(imageOf).filter(Boolean))];
+  const imageCount = Number.isSafeInteger(raw.image_count) && raw.image_count >= rawImages.length ? raw.image_count : rawImages.length;
+  const imagesComplete = source === 'detail' && Array.isArray(raw.images_list) && images.length === imageCount && raw.has_more_images !== true;
   let link = raw.share_info?.link || raw.share_info?.share_link || raw.share_link;
   if (!link && typeof raw.xsec_token === 'string' && raw.xsec_token.length < 1000) {
     link = `https://www.xiaohongshu.com/explore/${noteId}?xsec_token=${encodeURIComponent(raw.xsec_token)}&xsec_source=pc_search`;
@@ -127,6 +132,7 @@ function normalizeNote(raw, { source = 'search', fetchedAt = Date.now(), authorI
     collected: metric(raw.collected_count ?? interaction.collect_count), comments: metric(raw.comments_count ?? interaction.comment_count),
     shared: metric(raw.shared_count ?? raw.share_count ?? interaction.share_count),
     fans: metric(user.fans), sticky, sourceUrl: sourceLink(link, noteId), coverUrl: image,
+    images, imageCount, imagesComplete,
     bodyComplete: source === 'detail' && typeof raw.desc === 'string'
       && raw.desc.length <= 12000 && typeof rawTitle === 'string' && rawTitle.length <= 2000 && raw.desc_truncated !== true
       && raw.has_more_desc !== true && raw.title_truncated !== true

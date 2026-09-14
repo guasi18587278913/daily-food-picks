@@ -14,7 +14,7 @@ async function previouslyPublished(store, noteId) {
 }
 function publicNote(note) {
   const keys = ['noteId', 'title', 'author', 'authorId', 'type', 'publishedAt', 'likes', 'collected', 'comments',
-    'shared', 'fans', 'baseline', 'ratio', 'fanRatio', 'baselineReason', 'sourceUrl', 'fileId', 'boards', 'firstRoundId'];
+    'shared', 'fans', 'baseline', 'ratio', 'fanRatio', 'baselineReason', 'sourceUrl', 'fileId', 'coverUrl', 'boards', 'firstRoundId'];
   return Object.fromEntries(keys.map(k => [k, note[k] ?? null]));
 }
 function splitParts(notes) {
@@ -93,30 +93,41 @@ async function publish({ store, lease, round, notes, carriedNotes = [], status, 
   });
   return { ...snapshot, published: true };
 }
-async function storeCover({ store, upload, note, fetcher = fetch }) {
+async function storeCover({ store, upload, note, fetcher = fetch, report = () => {} }) {
   const url = imageUrl(note.coverUrl);
   if (!url) return null;
   const key = `cover_${digest(url).slice(0, 40)}`;
-  const cached = await store.get('dfp_state', key);
-  if (cached?.fileId) return cached.fileId;
+  const issue = (code, httpStatus = null) => { report({ code, httpStatus }); return null; };
+  try {
+    const cached = await store.get('dfp_state', key);
+    if (typeof cached?.fileId === 'string' && cached.fileId.startsWith('cloud://')) return cached.fileId;
+  } catch { issue('COVER_CACHE_READ_FAILED'); }
+  let phase = 'download', httpStatus = null;
   try {
     const response = await fetcher(url, { redirect: 'error', signal: AbortSignal.timeout(10000) });
+    httpStatus = response.status;
+    if (!response.ok) return issue('COVER_HTTP_ERROR', httpStatus);
     const contentType = response.headers.get('content-type') || '';
-    if (!response.ok || !/^(?:image\/(?:jpeg|png|webp)|application\/octet-stream)(?:;|$)/i.test(contentType)) return null;
-    // Binary path, bounded independently of JSON provider pages.
+    if (!/^(?:image\/(?:jpeg|png|webp)|application\/octet-stream)(?:;|$)/i.test(contentType)) return issue('COVER_CONTENT_TYPE', httpStatus);
     let size = 0; const chunks = [];
-    for await (const chunk of response.body) { size += chunk.length; if (size > 2 * 1024 * 1024) return null; chunks.push(Buffer.from(chunk)); }
+    for await (const chunk of response.body) {
+      size += chunk.length;
+      if (size > 2 * 1024 * 1024) return issue('COVER_TOO_LARGE', httpStatus);
+      chunks.push(Buffer.from(chunk));
+    }
     const bytes = Buffer.concat(chunks);
-    // Some note CDNs serve real images as octet-stream. Use bytes, not that label, to select the extension.
     const ext = bytes.length >= 3 && bytes.subarray(0, 3).equals(Buffer.from([0xff, 0xd8, 0xff])) ? 'jpg'
       : bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? 'png'
       : bytes.length >= 12 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP' ? 'webp' : null;
-    if (!ext) return null;
+    if (!ext) return issue('COVER_FORMAT', httpStatus);
+    phase = 'upload';
     const result = await upload({ cloudPath: `covers/${digest(bytes)}.${ext}`, fileContent: bytes });
-    if (typeof result.fileID !== 'string' || !result.fileID.startsWith('cloud://')) return null;
-    await store.put('dfp_state', key, { fileId: result.fileID });
+    if (typeof result.fileID !== 'string' || !result.fileID.startsWith('cloud://')) return issue('COVER_UPLOAD_INVALID', httpStatus);
+    try { await store.put('dfp_state', key, { fileId: result.fileID }); }
+    catch { issue('COVER_CACHE_WRITE_FAILED', httpStatus); }
+    // A failed cache write does not invalidate an uploaded, usable cover.
     return result.fileID;
-  } catch { return null; }
+  } catch { return issue(phase === 'upload' ? 'COVER_UPLOAD_FAILED' : 'COVER_DOWNLOAD_FAILED', httpStatus); }
 }
 
 module.exports = { publicNote, splitParts, isPublished, previouslyPublished, readSnapshot, publish, storeCover };

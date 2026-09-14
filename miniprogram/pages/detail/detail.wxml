@@ -1,0 +1,35 @@
+<view class="detail-page">
+  <view wx:if="{{loading}}" class="state"><text>正在读取内容…</text></view>
+  <view wx:elif="{{message}}" class="state">
+    <text class="state-title">暂时无法显示内容</text><text>{{message}}</text>
+    <button class="primary" bindtap="onRetry">重新加载</button><button class="secondary" bindtap="onBack">返回选题台</button>
+  </view>
+  <block wx:elif="{{note}}">
+    <view class="source-label">小红书 · 已采集内容</view>
+    <text class="title" selectable>{{title}}</text>
+    <view class="byline"><text>{{note.author || '作者未提供'}}</text><text> · {{publishedLabel}}</text></view>
+    <view class="metrics"><text>{{likesLabel}} 赞</text><text>{{collectedLabel}} 收藏</text><text>{{commentsLabel}} 评论</text></view>
+    <view wx:if="{{note.type === 'video'}}" class="media-section">
+      <video wx:if="{{content.videoUrl && !videoFailed}}" id="note-video" class="video" style="height:{{videoHeight}}rpx" src="{{content.videoUrl}}" poster="{{note.thumbUrl || ''}}" controls show-center-play-btn show-fullscreen-btn object-fit="contain" bindloadedmetadata="onVideoMetadata" binderror="onVideoError" />
+      <view wx:else class="media-unavailable">
+        <image wx:if="{{note.thumbUrl}}" class="poster" src="{{note.thumbUrl}}" mode="widthFix" binderror="onPosterError" />
+        <text>{{videoFailed ? '视频暂时无法播放，正文仍可查看。' : '暂未取得可播放的视频，正文仍可查看。'}}</text>
+        <button wx:if="{{videoFailed}}" class="secondary" bindtap="onRetry">重试加载</button>
+      </view>
+    </view>
+    <view wx:if="{{content.status === 'missing'}}" class="notice">这篇选题暂未保存可阅读的正文和配图。</view>
+    <view wx:elif="{{!content.bodyComplete && content.desc}}" class="notice">以下为已取得的正文，可能不完整。</view>
+    <text wx:if="{{content.desc}}" class="body" selectable>{{content.desc}}</text>
+    <text wx:elif="{{content.status !== 'missing'}}" class="empty-body">{{content.bodyComplete ? '这篇笔记没有文字正文。' : '暂未取得文字正文。'}}</text>
+    <view wx:if="{{note.type === 'normal'}}" class="gallery">
+      <view wx:for="{{images}}" wx:key="url" class="gallery-item">
+        <image wx:if="{{!item.failed}}" class="gallery-image" src="{{item.url}}" mode="widthFix" lazy-load data-index="{{index}}" bindtap="onPreviewImage" binderror="onImageError" />
+        <view wx:else class="image-unavailable">第 {{index + 1}} 张图片暂时无法显示</view>
+      </view>
+      <view wx:if="{{!content.imagesComplete}}" class="notice">{{images.length ? '当前只展示已取得的配图。' : '这篇图文的配图暂未保存。'}}</view>
+    </view>
+    <view class="footer"><text>采集于 {{capturedLabel}}</text><text>内容来自原作者，展示采集时已取得的版本。</text></view>
+    <button wx:if="{{canOpenOriginal}}" class="primary" bindtap="onOpenOriginal" loading="{{openingOriginal}}">前往小红书</button>
+    <button class="secondary back" bindtap="onBack">返回选题台</button>
+  </block>
+</view>
