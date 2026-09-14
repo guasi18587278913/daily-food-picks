@@ -84,3 +84,32 @@ test('existing negative round counts or zero limits fail closed', async () => {
     assert.equal((await store.list('dfp_results')).length, 0);
   }
 });
+test('twenty-call production cap is concurrent-safe and preserves old three-call round definitions', async () => {
+  const { store, lease } = await setup();
+  const expanded = { ...settings, roundCalls: 20 };
+  await store.put('dfp_rounds', '20260912-1200', { status: 'running', definition: { visionRoundCalls: 20 } });
+  const base = { lease, scope: 'round', roundId: '20260912-1200', now: NOW, settings: expanded, price };
+  const results = await Promise.allSettled(Array.from({ length: 21 }, (_, i) => reserveVision(store, { ...base, key: (i+1).toString(16).padStart(64, '0') })));
+  assert.equal(results.filter(r => r.status === 'fulfilled').length, 20);
+  assert.equal(results.find(r => r.status === 'rejected').reason.code, 'VISION_ROUND_BUDGET');
+  assert.equal((await store.get('dfp_rounds', '20260912-1200')).visionCalls, 20);
+  const old = await setup();
+  for (let i = 0; i < 3; i++) await reserveVision(old.store, { ...base, lease: old.lease, roundId: '20260912-0900', key: String(i+1).repeat(64) });
+  await assert.rejects(() => reserveVision(old.store, { ...base, lease: old.lease, roundId: '20260912-0900', key: '4'.repeat(64) }), /VISION_ROUND_BUDGET/);
+});
+test('twenty per round still stops at the shared daily money limit and never increases validation caps', async () => {
+  const { store, lease } = await setup(); const expanded = { ...settings, roundCalls: 20 };
+  await store.put('dfp_rounds', '20260912-1200', { status: 'running', definition: { visionRoundCalls: 20 } });
+  await store.put('dfp_budgets', 'vision-day-2026-09-12', { calls: 1, allocatedMicroCny: 480000, knownMicroCny: 480000 });
+  await assert.rejects(() => reserveVision(store, { lease, roundId: '20260912-1200', key: 'a'.repeat(64), now: NOW, settings: expanded, price }), /VISION_DAILY_BUDGET/);
+  await assert.rejects(() => reserveVision(store, { lease, scope: 'validation', key: 'b'.repeat(64), now: NOW, settings: { ...expanded, validationCalls: 7 }, price }), /VISION_INVALID_BUDGET/);
+  await assert.rejects(() => reserveVision(store, { lease, roundId: '20260912-1200', key: 'c'.repeat(64), now: NOW, settings: { ...expanded, roundCalls: 21 }, price }), /VISION_INVALID_BUDGET/);
+});
+test('configuration accepts twenty only when explicitly configured and freezes it into new rounds', () => {
+  const { loadConfig, scheduledRound } = require('../cloudfunctions/collectTick/lib/config');
+  const env = { DFP_DISCOVERY_MODE: 'adaptive', DFP_VISION_ENABLED: 'true', DFP_VISION_DAILY_MICRO_CNY: '500000', DFP_VISION_KEY: 'fixture-only-key-000000', DFP_VISION_ROUND_CALLS: '20' };
+  const config = loadConfig(env);
+  assert.equal(config.vision.roundCalls, 20);
+  assert.equal(scheduledRound(NOW, { ...config, dailyCalls: 50 }).visionRoundCalls, 20);
+  assert.throws(() => loadConfig({ ...env, DFP_VISION_ROUND_CALLS: '21' }), /INVALID_VISION_CONFIG/);
+});

@@ -26,7 +26,7 @@
         "DFP_VISION_ENABLED": "false",
         "DFP_VISION_KEY": "",
         "DFP_VISION_DAILY_MICRO_CNY": "500000",
-        "DFP_VISION_ROUND_CALLS": "3"
+        "DFP_VISION_ROUND_CALLS": "20"
       },
       "triggers": []
     },

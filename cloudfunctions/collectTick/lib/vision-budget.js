@@ -10,7 +10,7 @@ function fail(code) { const e = new Error(code); e.code = code; throw e; }
 const integer = (n, min, max) => Number.isSafeInteger(n) && n >= min && n <= max;
 function validateSettings(settings) {
   if (!settings?.enabled) fail('VISION_DISABLED');
-  if (!integer(settings.dailyMicroCny, 1, 500000) || !integer(settings.roundCalls, 1, 3)
+  if (!integer(settings.dailyMicroCny, 1, 500000) || !integer(settings.roundCalls, 1, 20)
     || !integer(settings.validationCalls, 1, 6) || !integer(settings.validationMicroCny, 1, 200000)) fail('VISION_INVALID_BUDGET');
 }
 function validatePrice(price, now) {
@@ -54,7 +54,7 @@ async function reserveVision(store, { lease, scope = 'round', roundId, key, now,
     if (scope === 'round' && (!round || round.status !== 'running')) fail('ROUND_NOT_RUNNING');
     const roundCalls = round?.visionCalls === undefined ? 0 : round.visionCalls;
     const roundLimit = round?.definition?.visionRoundCalls === undefined ? settings.roundCalls : round.definition.visionRoundCalls;
-    if (round && (!integer(roundCalls, 0, 3) || !integer(roundLimit, 1, 3))) fail('VISION_INVALID_BUDGET');
+    if (round && (!integer(roundCalls, 0, 20) || !integer(roundLimit, 1, 20))) fail('VISION_INVALID_BUDGET');
     if (round && roundCalls >= Math.min(settings.roundCalls, roundLimit)) fail('VISION_ROUND_BUDGET');
     if (daily.allocatedMicroCny + RESERVATION_MICRO_CNY > settings.dailyMicroCny) fail('VISION_DAILY_BUDGET');
     if (trial && (trial.calls >= settings.validationCalls || trial.allocatedMicroCny + RESERVATION_MICRO_CNY > settings.validationMicroCny)) fail('VISION_VALIDATION_BUDGET');

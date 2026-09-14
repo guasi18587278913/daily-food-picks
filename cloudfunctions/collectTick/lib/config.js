@@ -75,7 +75,7 @@ function loadConfig(env = process.env) {
   if (!['legacy', 'adaptive'].includes(config.discoveryMode)) throw error('INVALID_DISCOVERY_CONFIG');
   config.vision = { enabled: env.DFP_VISION_ENABLED === 'true',
     dailyMicroCny: number(env.DFP_VISION_DAILY_MICRO_CNY, 500000),
-    roundCalls: number(env.DFP_VISION_ROUND_CALLS, 3), validationCalls: 6, validationMicroCny: 200000 };
+    roundCalls: number(env.DFP_VISION_ROUND_CALLS, 20), validationCalls: 6, validationMicroCny: 200000 };
   if (config.vision.enabled && (config.discoveryMode !== 'adaptive' || !config.vision.dailyMicroCny
     || !config.vision.roundCalls || typeof env.DFP_VISION_KEY !== 'string' || env.DFP_VISION_KEY.length < 20)) throw error('INVALID_VISION_CONFIG');
   if (config.aiProvider !== 'hunyuan-v3' || config.aiModel !== 'hy3') throw error('FREE_AI_ONLY');
