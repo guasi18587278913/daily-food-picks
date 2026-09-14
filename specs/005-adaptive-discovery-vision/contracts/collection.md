@@ -18,4 +18,4 @@
 - 视觉改用直接VITA接口 `https://api.vita.cloud.tencent.com/v1/video2text/chat/completions`，模型 `vita-video-3.0`。该接口的 `max_tokens=16384` 表示输入输出合计上限，`max_completion_tokens=1024` 表示输出上限。按输入16384、输出1024保守预留23245微元人民币，不沿用TokenHub语义。
 - 视觉金额使用整数微元人民币，日账上限500000、首验上限200000。首验最多6次并同时计日账，正式轮每轮最多3次；首验是独立验收范围，不伪造正式轮次。
 - 视觉请求编号绑定范围/轮次、内容、帧摘要、规则与模型；reserved→inflight→received/failed/unknown。合法usage才按向上取整的实际token费用结算，缺usage、超时或未知保持预留。超出契约用量即停止通道并对账，不缩小费用凑上限。结算使用请求原日账并验证所有者。
-- 直接VITA已实测支持Base64。当前V3待验实现以六个image_url发送独立JPEG，逐帧摘要与请求编号绑定，拒绝外部URL替换；不换收费模型，原始画面与缓存引用不进入客户端。
+- 直接VITA已实测支持Base64。已通过三例真实验证的V3实现以六个image_url发送独立JPEG，逐帧摘要与请求编号绑定，拒绝外部URL替换；不换收费模型，原始画面与缓存引用不进入客户端。
