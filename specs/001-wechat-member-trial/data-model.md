@@ -11,6 +11,7 @@
 - `status`: `pending/running/complete/partial/failed/budget_exhausted`。
 - `leaseOwner`, `leaseEpoch`, `leaseExpiresAt`: 防重复运行和过期工作者提交。
 - `progress`: 已完成逻辑请求及阶段；最多一次自动重试，不从头重买。
+- `progress.candidateIds`: 建队列时固定检查顺序。常规轮按本周→低粉→仅今日交错后截取40个；恢复时沿用该序列，不因规则部署重新排序。
 - `definition.kind`: `regular`（09/12/20，窗口 20 分钟）或 `sweep`（06:00 今日新锐扫描，窗口 30 分钟）；缺省按 regular 处理。`definition.sweepEnabled` 记录建轮时是否已配置 06:00 扫描额度。
 - `coverage`: 关键词、页数、类型、候选数、缺口和停止原因。常规轮发布时另含 `carriedToday`：当天 06:00 快照编号和带上的今日作品数；未启用扫描或 06:30 前的轮次为 null；06:00 缺失、未发布或读取失败时 count 为 0，并用 `errorCode`（SWEEP_MISSING / SWEEP_NOT_PUBLISHED / CORRUPT_SNAPSHOT / NOT_FOUND / CARRY_READ_FAILED）说明；前两种对应本轮缺口 SWEEP_UNAVAILABLE，后三种对应 CARRY_UNAVAILABLE。临时读取失败先在本轮窗口内重试。带上的作品保留首个推荐轮次和原有板块，不新增推荐记录或搜索行。
 - `snapshotId`: 校验并发布后才设置；非发布状态为 null。
@@ -28,13 +29,15 @@
 
 - `noteId`, `authorId`: 非空供应商编号，当前小红书格式为 24 位十六进制；未知格式先拒绝并记录契约变化。
 - `title`: 至多 2000 字符；`desc`: 至多 12000 字符；截断/不完整必须单独记录。
+- `bodyComplete`: 详情明确返回完整的字符串标题和正文，且无截断标记或末尾省略号；正文可以是已知空字符串。缺失正文不是空正文，搜索结果始终不能作为完整详情。
 - `type`: `video/normal`；其他类型记为不支持，不伪装图文。
 - `publishedAt`: 有效带时区时间；未知则不进入时间窗口。
 - `likes/collected/comments/shared/fans`: 非负安全整数或 null；未知不是 0。
 - `sticky`: `true/false/null`；null 不能当作未置顶。
 - `link`: HTTPS 小红书来源链接，保留原始必要参数；不允许任意协议。
 - `judgment`: `cooking/not_cooking/uncertain/error`；只有 cooking 且证据有效才推荐。
-- `evidence`: 输入正文中的原文片段，最长 500 字符；必须验证为实际子串。
+- `evidence`: 输入标题或正文中的原文片段，最长500字符，模型提示最多120字符；必须验证为实际连续子串，并核对去除标签后的原字段，避免只截出标签中的“教程”。
+- `evidenceSource`: title/desc；旧格式未提供时默认为desc，uncertain且无证据时可为null。视频可以引用带制作意图或操作／配方的标题，图文不能只靠标题入选。确定的排除结果同样要求原文证据，菜名不能作为标题排除依据。
 - `history`: 候选之前的前 7 篇合格历史编号与点赞；缺失点赞不能跳过该篇改用第 8 篇。
 - `baseline`: 7 个值的中位数，即排序后第 4 个值；值为 0 或不足 7 篇时不计算有效 ratio。
 - `ratio`: 今日板块对作者前 7 篇中位数的倍率，有限非负数或 null；不能出现 Infinity/NaN。

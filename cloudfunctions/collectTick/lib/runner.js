@@ -27,7 +27,7 @@ function admitsCandidate(round, note) {
   const boards = eligibleBoards(note, round.scheduledAt, { allowUnknownFans: true });
   return round.kind === 'sweep' ? boards.includes('today') : boards.length > 0;
 }
-function prioritizeCandidates(rows) {
+function prioritizeRecipeClues(rows) {
   const score = row => {
     const body = String(row.note.desc || '').replace(/#[^#]*#/g, ' ');
     return (/食材|用料|配方|步骤|制作方法/.test(body) ? 2 : 0)
@@ -41,6 +41,21 @@ function prioritizeCandidates(rows) {
     while (group.length) { ordered.push(group.shift()); if (group.length) ordered.push(group.pop()); }
   }
   return ordered;
+}
+function prioritizeCandidates(rows, round) {
+  const ordered = prioritizeRecipeClues(rows);
+  if (round?.kind !== 'regular' || !Number.isFinite(round.scheduledAt)) return ordered;
+  const queues = { week: [], dark: [], today: [], other: [] };
+  for (const row of ordered) {
+    const boards = eligibleBoards(row.note, round.scheduledAt, { allowUnknownFans: true });
+    const group = boards.includes('week') ? 'week' : boards.includes('today') ? 'today' : boards.includes('dark') ? 'dark' : 'other';
+    queues[group].push(row);
+  }
+  const result = [];
+  while (queues.week.length || queues.dark.length || queues.today.length) {
+    for (const group of ['week', 'dark', 'today']) if (queues[group].length) result.push(queues[group].shift());
+  }
+  return [...result, ...queues.other];
 }
 async function saveProgress(store, lease, roundId, progress, clock) {
   await store.transaction(async tx => {
@@ -185,8 +200,8 @@ async function runTick({ store, config, key, generate, upload, clock = Date.now,
       }
       if (progress.candidateIds === null) {
         const rows = await candidateRows(store, round.id);
-        // Clues only prioritize paid inspection; publication still requires full-body model evidence.
-        const ordered = prioritizeCandidates(rows);
+        // Give each board an inspection opportunity; admission still requires validated model evidence.
+        const ordered = prioritizeCandidates(rows, round);
         progress.candidateIds = ordered.slice(0, 40).map(x => x.note.noteId);
         if (ordered.length > 40) progress.gaps.push('CANDIDATE_CAP');
         await saveProgress(store, lease, round.id, progress, clock);

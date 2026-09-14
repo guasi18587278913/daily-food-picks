@@ -1,5 +1,5 @@
 {
-  "version": "2026-09-14-partial-zero-results",
+  "version": "2026-09-14-video-intent-board-turns",
   "timezone": "Asia/Shanghai",
   "scheduleHours": [9, 12, 20],
   "windowMinutes": 20,

@@ -43,7 +43,8 @@ function normalizeNote(raw, { source = 'search', fetchedAt = Date.now(), authorI
   const user = raw.user || {};
   const uid = user.userid ?? user.user_id ?? user.id ?? authorId;
   if (!ID.test(noteId || '') || !ID.test(uid || '') || !['video', 'normal'].includes(raw.type)) return null;
-  const title = text(raw.title || raw.display_title, 2000);
+  const rawTitle = raw.title || raw.display_title || '';
+  const title = text(rawTitle, 2000);
   const desc = text(raw.desc, 12000);
   const pinned = raw.sticky ?? raw.is_top;
   const sticky = typeof pinned === 'boolean' ? pinned : ([0, 1].includes(pinned) ? pinned === 1 : null);
@@ -57,9 +58,10 @@ function normalizeNote(raw, { source = 'search', fetchedAt = Date.now(), authorI
     publishedAt: publishedTime(raw), likes: metric(raw.liked_count ?? raw.likes),
     collected: metric(raw.collected_count), comments: metric(raw.comments_count), shared: metric(raw.shared_count ?? raw.share_count),
     fans: metric(user.fans), sticky, sourceUrl: sourceLink(link, noteId), coverUrl: image,
-    bodyComplete: source === 'detail' && typeof raw.desc === 'string' && desc.trim().length > 0
-      && raw.desc.length <= 12000 && (raw.title || '').length <= 2000 && raw.desc_truncated !== true
-      && raw.has_more_desc !== true && !/[.。…]{3,}\s*$/.test(desc),
+    bodyComplete: source === 'detail' && typeof raw.desc === 'string'
+      && raw.desc.length <= 12000 && typeof rawTitle === 'string' && rawTitle.length <= 2000 && raw.desc_truncated !== true
+      && raw.has_more_desc !== true && raw.title_truncated !== true
+      && !/(?:[.。]{3,}|…+)\s*$/.test(desc) && !/(?:[.。]{3,}|…+)\s*$/.test(title),
     source, fetchedAt: new Date(fetchedAt).toISOString() };
 }
 function parseResponse(kind, payload, now, params = {}) {
