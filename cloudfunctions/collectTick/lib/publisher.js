@@ -30,6 +30,7 @@ function splitParts(notes) {
 async function readSnapshot(store, id) {
   const snapshot = await store.get('dfp_snapshots', id);
   if (!snapshot?.published) throw error('NOT_FOUND');
+  if (!Array.isArray(snapshot.parts) || snapshot.parts.some(ref => typeof ref?.id !== 'string' || typeof ref.hash !== 'string')) throw error('CORRUPT_SNAPSHOT');
   const notes = [];
   for (const ref of snapshot.parts) {
     const part = await store.get('dfp_parts', ref.id);
@@ -39,7 +40,7 @@ async function readSnapshot(store, id) {
   if (notes.length !== snapshot.count) throw error('CORRUPT_SNAPSHOT');
   return { ...snapshot, notes };
 }
-async function publish({ store, lease, round, notes, status, coverage, partialReason = '', successfulSearches, now, clock = Date.now }) {
+async function publish({ store, lease, round, notes, carriedNotes = [], status, coverage, partialReason = '', successfulSearches, now, clock = Date.now }) {
   const time = () => now ?? clock();
   if (!['complete', 'partial'].includes(status)) throw error('INVALID_STATUS');
   if (status === 'partial' && !partialReason.trim()) throw error('PARTIAL_REASON_REQUIRED');
@@ -51,7 +52,9 @@ async function publish({ store, lease, round, notes, status, coverage, partialRe
     if (!await previouslyPublished(store, note.noteId)) unique.push({ ...note, firstRoundId: round.id });
   }
   unique.sort((a, b) => a.noteId.localeCompare(b.noteId));
-  const visible = unique.map(publicNote);
+  // Carried notes were recommended by an earlier snapshot: shown again, but they get no new search rows or dedup references.
+  const shown = new Map([...carriedNotes, ...unique].map(note => [note.noteId, publicNote(note)]));
+  const visible = [...shown.values()].sort((a, b) => a.noteId.localeCompare(b.noteId));
   const id = `${round.id}-${digest([visible, status, coverage, partialReason]).slice(0, 12)}`;
   const existing = await store.get('dfp_snapshots', id);
   if (existing?.published) return existing;

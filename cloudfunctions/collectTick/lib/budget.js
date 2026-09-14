@@ -12,9 +12,10 @@ function shanghaiDay(now) {
   return new Date(now + 8 * 3600000).toISOString().slice(0, 10);
 }
 function integer(value, min, max) { return Number.isSafeInteger(value) && value >= min && value <= max; }
+// Hard ceilings from the 2026-09-13 approval: 150 calls / 1.50 USD a day, at most 100 calls in one (06:00 sweep) round.
 function validateLimits(limits) {
-  if (!limits || !integer(limits.dailyCalls, 1, 50) || !integer(limits.dailyMicroUsd, 1, 500000)
-    || !integer(limits.roundCalls, 1, 20) || !integer(limits.validationCalls, 1, 20)
+  if (!limits || !integer(limits.dailyCalls, 1, 150) || !integer(limits.dailyMicroUsd, 1, 1500000)
+    || !integer(limits.roundCalls, 1, 100) || !integer(limits.validationCalls, 1, 20)
     || !integer(limits.validationMicroUsd, 1, 200000)) fail('INVALID_BUDGET');
 }
 function validatePrice(price, now) {
@@ -76,7 +77,9 @@ async function reserveAttempt(store, request) {
     const daily = await tx.get('dfp_budgets', day) || { calls: 0, microUsd: 0 };
     const trial = validation ? (await tx.get('dfp_budgets', 'initial-validation') || { calls: 0, microUsd: 0 }) : null;
     if (daily.calls + 1 > limits.dailyCalls || daily.microUsd + price.microUsd > limits.dailyMicroUsd) fail('DAILY_BUDGET');
-    if ((round.calls || 0) + 1 > limits.roundCalls) fail('ROUND_BUDGET');
+    // Only the 06:00 sweep may use up to 100 calls; every other round keeps the original 20-call ceiling.
+    const roundCeiling = round.definition?.kind === 'sweep' ? 100 : 20;
+    if ((round.calls || 0) + 1 > Math.min(limits.roundCalls, roundCeiling)) fail('ROUND_BUDGET');
     if (trial && (trial.calls + 1 > limits.validationCalls || trial.microUsd + price.microUsd > limits.validationMicroUsd)) fail('VALIDATION_BUDGET');
     const record = {
       roundId, requestKey, kind, attempt, day, validation, owner: lease.owner, leaseEpoch: lease.epoch,

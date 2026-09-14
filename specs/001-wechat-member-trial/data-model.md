@@ -11,7 +11,8 @@
 - `status`: `pending/running/complete/partial/failed/budget_exhausted`。
 - `leaseOwner`, `leaseEpoch`, `leaseExpiresAt`: 防重复运行和过期工作者提交。
 - `progress`: 已完成逻辑请求及阶段；最多一次自动重试，不从头重买。
-- `coverage`: 关键词、页数、类型、候选数、缺口和停止原因。
+- `definition.kind`: `regular`（09/12/20，窗口 20 分钟）或 `sweep`（06:00 今日新锐扫描，窗口 30 分钟）；缺省按 regular 处理。`definition.sweepEnabled` 记录建轮时是否已配置 06:00 扫描额度。
+- `coverage`: 关键词、页数、类型、候选数、缺口和停止原因。常规轮发布时另含 `carriedToday`：当天 06:00 快照编号和带上的今日作品数；未启用扫描或 06:30 前的轮次为 null；06:00 缺失、未发布或读取失败时 count 为 0，并用 `errorCode`（SWEEP_MISSING / SWEEP_NOT_PUBLISHED / CORRUPT_SNAPSHOT / NOT_FOUND / CARRY_READ_FAILED）说明；前两种对应本轮缺口 SWEEP_UNAVAILABLE，后三种对应 CARRY_UNAVAILABLE。临时读取失败先在本轮窗口内重试。带上的作品保留首个推荐轮次和原有板块，不新增推荐记录或搜索行。
 - `snapshotId`: 校验并发布后才设置；非发布状态为 null。
 
 ## RequestAttempt 与 Budget
