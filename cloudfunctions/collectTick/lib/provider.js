@@ -155,15 +155,20 @@ class Provider {
       }
       await markInflight(this.store, record.id, this.lease, this.clock());
       this.sent++;
+      // Persist only status numbers; response messages may contain private data.
+      const diagnostics = { httpStatus: null, providerCode: null, providerDataCode: null };
       try {
         const url = new URL(ENDPOINTS[kind], BASE);
         Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
         const response = await this.fetcher(url, { headers: { Authorization: `Bearer ${this.key}` },
           signal: AbortSignal.timeout(40000), redirect: 'error' });
+        diagnostics.httpStatus = response.status;
         if (!response.ok) throw error(response.status === 401 || response.status === 403 ? 'PROVIDER_AUTH'
           : response.status === 429 || response.status >= 500 ? 'HTTP_RETRYABLE' : 'HTTP_REJECTED');
         const body = await readLimited(response);
         let payload; try { payload = JSON.parse(body); } catch { throw error('PROVIDER_SCHEMA'); }
+        diagnostics.providerCode = payload?.code;
+        diagnostics.providerDataCode = payload?.data?.code;
         const parsed = parseResponse(kind, payload, this.clock(), params);
         // Store normalized pages in bounded chunks, never raw credentials or provider responses.
         const pages = [];
@@ -177,11 +182,11 @@ class Provider {
         const value = { ...parsed }; delete value.notes;
         value.pages = pages;
         await this.store.put('dfp_results', record.id, { value });
-        await finishAttempt(this.store, record.id, this.lease, { status: 'succeeded', resultRef: record.id }, this.clock());
+        await finishAttempt(this.store, record.id, this.lease, { status: 'succeeded', resultRef: record.id, ...diagnostics }, this.clock());
         return value;
       } catch (e) {
         const code = ['PROVIDER_AUTH', 'HTTP_RETRYABLE', 'HTTP_REJECTED', 'PROVIDER_REJECTED', 'PROVIDER_SCHEMA', 'RESPONSE_TOO_LARGE'].includes(e.code) ? e.code : 'NETWORK_ERROR';
-        await finishAttempt(this.store, record.id, this.lease, { status: code === 'NETWORK_ERROR' ? 'unknown' : 'failed', errorCode: code }, this.clock());
+        await finishAttempt(this.store, record.id, this.lease, { status: code === 'NETWORK_ERROR' ? 'unknown' : 'failed', errorCode: code, ...diagnostics }, this.clock());
         if (code !== 'HTTP_RETRYABLE' || attempt === 2) throw error(code);
       }
     }

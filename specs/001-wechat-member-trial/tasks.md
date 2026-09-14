@@ -2,7 +2,7 @@
 
 **Input**: [spec.md](spec.md)、[plan.md](plan.md)、[research.md](research.md)、[cost-options.md](cost-options.md)、[data-model.md](data-model.md)、[contracts/cloud-api.md](contracts/cloud-api.md)。
 
-**Status**: 业务源码、独立审查、云端部署及当天真实定时更新已完成。体验版0.1.1和大芙平台体验资格已就绪，尚待她首次打开绑定真实身份及真机六项验收。日上限50次、首验20次均已授权；当日实际36次/$0.36。2026-09-13 新增今日新锐 06:00 扫描（Phase 8），日上限批准调整为 150 次；源码与离线测试已完成，独立审查和部署待办。
+**Status**: 原试用版与 06:00 扫描已部署；2026-09-13 起日上限批准为 150 次、06:00 为 100 次。大芙真机验收和有结果时的跨轮沿用仍未完成。2026-09-14 三条工作线在独立本地分支整合，诊断和部分零结果发布已修复、未上线，见[统一收尾记录](../../docs/operations/2026-09-14-closeout.md)。
 
 **路径约定**：源码路径相对统一项目根；`SPEC` 指 `specs/001-wechat-member-trial/`。运行证据见[运行记录](../../docs/operations/wechat-trial-runbook.md)。
 

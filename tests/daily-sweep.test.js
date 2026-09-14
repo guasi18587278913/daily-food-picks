@@ -212,6 +212,44 @@ test('a 06:00 pick that also crosses the week threshold keeps both boards for th
   assert.deepEqual(snapshot.boards, { today: 1, week: 1, dark: 0 });
 });
 
+test('a sweep with successful empty searches and one rejected query publishes explicit partial zero results', async () => {
+  const store = new MemoryStore(); const log = [];
+  const options = deps(store, at('2026-09-13T06:02:00+08:00'), log, { notes: [] });
+  const make = options.makeProvider;
+  options.makeProvider = () => {
+    const provider = make(); const request = provider.request.bind(provider);
+    provider.request = async (kind, params) => {
+      if (kind === 'search' && params.keyword === '月子餐食谱') throw Object.assign(new Error('HTTP_REJECTED'), { code: 'HTTP_REJECTED' });
+      return request(kind, params);
+    };
+    return provider;
+  };
+  const result = await runTick(options);
+  assert.equal(result.status, 'partial');
+  const snapshot = await readSnapshot(store, result.snapshotId);
+  assert.equal(snapshot.count, 0);
+  assert.equal(snapshot.coverage.successfulSearches, 54);
+  assert.deepEqual(snapshot.coverage.gaps, ['REQUEST_FAILED']);
+  assert.match(snapshot.partialReason, /未选出新作品/);
+});
+
+test('regular rounds with no new picks carry the morning picks even when their inspection budget ends', async () => {
+  const store = new MemoryStore(); const log = [];
+  await runTick(deps(store, at('2026-09-13T06:02:00+08:00'), log));
+  const firstRef = await store.get('dfp_candidates', `published_${TODAY.noteId}`);
+  const now = at('2026-09-13T09:02:00+08:00');
+  const round = scheduledRound(now, RUN);
+  const lease = await claimLease(store, { owner: 'regular-closeout', now });
+  await store.put('dfp_rounds', round.id, { status: 'running', definition: round });
+  const result = await require('../cloudfunctions/collectTick/lib/runner').conclude({ store, lease, round,
+    progress: { successfulSearches: 4, candidateIds: [], candidateIndex: 0, gaps: [] }, reason: 'ROUND_BUDGET', clock: () => now });
+  assert.equal(result.status, 'partial');
+  const snapshot = await readSnapshot(store, result.snapshotId);
+  assert.deepEqual(snapshot.notes.map(note => note.noteId), [TODAY.noteId]);
+  assert.equal(snapshot.coverage.carriedToday.count, 1);
+  assert.deepEqual(await store.get('dfp_candidates', `published_${TODAY.noteId}`), firstRef);
+});
+
 test('the next day does not carry yesterday’s picks and reports that its own 06:00 sweep is missing', async () => {
   const store = new MemoryStore(); const log = [];
   await runTick(deps(store, at('2026-09-13T06:02:00+08:00'), log));

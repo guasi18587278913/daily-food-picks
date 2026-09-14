@@ -2,14 +2,15 @@
 const { createApi, createPoller, shouldFollowLatest, copySource } = require('../../lib/api');
 const { createFavorites } = require('../../lib/favorites');
 const { boards, card, formatTime } = require('../../lib/view');
-const STORAGE_KEY = 'food-picks:favorites:v1';
+const STORAGE_KEY = 'food-picks:favorites:v2';
+const LEGACY_STORAGE_KEY = 'food-picks:favorites:v1';
 
 Page({
   data: {
     // access: checking | ready | needsCode | suspended | blocked — decided by the server, never guessed here.
     access: 'checking', role: '', codeInput: '', redeeming: false,
     mode: 'round', query: '', loading: true, loadingMore: false, message: '',
-    statusLabel: '正在查看更新', statusTone: '', roundLabel: '每日三次，给创作找点新意', updatedLabel: '',
+    statusLabel: '正在查看更新', statusTone: '', roundLabel: '每天更新，给创作找点新意', updatedLabel: '',
     partialReason: '', coverageNotice: '基于当轮关键词发现选题，未覆盖小红书全部内容。',
     favoriteNotice: '收藏仅保存在本机',
     newAvailable: false, total: 0, favoriteCount: 0, nextCursor: /** @type {string|null} */ (null),
@@ -30,10 +31,16 @@ Page({
   _statusRequestId: 0,
   _favoriteOffset: 0,
   _cloudFavorites: false,
+  _favoriteSync: /** @type {Promise<void>|null} */ (null),
+  _favoriteOperation: /** @type {Promise<void>|null} */ (null),
+  _syncingFavoriteIds: /** @type {string[]} */ ([]),
   _returnMode: 'round',
   _visible: false,
   onLoad() {
-    this._favorites = createFavorites({ get: () => wx.getStorageSync(STORAGE_KEY), set: value => wx.setStorageSync(STORAGE_KEY, value) });
+    this._favorites = createFavorites({ get: () => {
+      const current = wx.getStorageSync(STORAGE_KEY);
+      return current === '' || current === undefined || current === null ? wx.getStorageSync(LEGACY_STORAGE_KEY) : current;
+    }, set: value => wx.setStorageSync(STORAGE_KEY, value) });
     this.setData({ favoriteCount: this._favorites.ids().length });
     if (this._favorites.corrupt) wx.showToast({ title: '部分收藏记录无法读取', icon: 'none' });
     this._poller = createPoller(() => this.checkUpdates());
@@ -101,21 +108,37 @@ Page({
    * Brings favourites in line with the account. On the first run after the upgrade the local copy is
    * merged up, so nothing saved on this phone is lost; afterwards the server copy is mirrored down.
    */
-  async syncFavorites() {
+  syncFavorites() {
+    if (!this._favoriteSync) {
+      this._favoriteSync = this.serializeFavorites(() => this.syncFavoritesOnce()).finally(() => {
+        this._favoriteSync = null; this._syncingFavoriteIds = [];
+      });
+    }
+    return this._favoriteSync;
+  },
+  /** Cloud writes and mirror refreshes share one order, so a stale read cannot undo a completed write.
+   * @template T @param {()=>Promise<T>} operation @returns {Promise<T>}
+   */
+  serializeFavorites(operation) {
+    const result = (this._favoriteOperation || Promise.resolve()).then(operation);
+    // The caller still receives a failure; only the queue tail recovers so later work may proceed.
+    this._favoriteOperation = result.then(() => {}, () => {});
+    return result;
+  },
+  async syncFavoritesOnce() {
     const local = this._favorites;
     if (!local) return;
     try {
       const remote = await this._account('favorites.list');
-      const pending = local.entries();
-      // Anything this phone holds that the account does not is merged up — including favourites added
-      // while the account was unreachable. Merging is a union, so doing it again costs nothing and
-      // never drops an entry; deciding by `mergedAt` alone would silently discard offline additions.
+      const pending = local.pendingEntries();
+      this._syncingFavoriteIds = Object.keys(pending);
+      // Only locally unsent additions are merged. Synced mirrors must follow removals on other devices.
       const held = remote.items || {};
       const unsent = Object.keys(pending).filter(id => !Object.prototype.hasOwnProperty.call(held, id));
       const merged = unsent.length ? await this._account('favorites.merge', { items: pending }) : remote;
-      const stored = local.replace(merged.items || {});
-      this._cloudFavorites = true;
-      this.setData({ favoriteNotice: '收藏跟着微信账号', favoriteCount: local.ids().length });
+      const stored = local.replace(merged.items || {}, pending);
+      this._cloudFavorites = !Object.keys(local.pendingEntries()).length;
+      this.setData({ favoriteNotice: this._cloudFavorites ? '收藏跟着微信账号' : '部分收藏等待同步', favoriteCount: local.ids().length });
       if (!stored.ok) wx.showToast({ title: stored.message || '本地副本未能保存', icon: 'none' });
     } catch (caught) {
       // The local copy is kept exactly as it is, so neither an upgrade nor an outage costs a favourite.
@@ -269,14 +292,21 @@ Page({
   /** @param {{currentTarget:{dataset:Record<string,string>}}} event */
   async onFavorite(event) {
     const id = event.currentTarget.dataset.id;
+    if ((this._favoriteSync && this._cloudFavorites) || this._syncingFavoriteIds.includes(id)) {
+      wx.showToast({ title: '正在同步收藏，请完成后重试', icon: 'none' });
+      return;
+    }
     let selected;
     if (this._cloudFavorites) {
       // The account copy decides. Nothing on screen changes until the server confirms the write.
       try {
-        selected = (await this._account('favorites.toggle', { noteId: id })).selected;
-        const next = this._favorites?.entries() || {};
-        if (selected) next[id] = Date.now(); else delete next[id];
-        this._favorites?.replace(next);
+        selected = await this.serializeFavorites(async () => {
+          const state = (await this._account('favorites.toggle', { noteId: id })).selected;
+          const next = this._favorites?.entries() || {};
+          if (state) next[id] = Date.now(); else delete next[id];
+          this._favorites?.replace(next);
+          return state;
+        });
       } catch (caught) {
         const e = /** @type {FoodError} */ (caught);
         // An access-level refusal must close the content down, exactly as it does on a read.

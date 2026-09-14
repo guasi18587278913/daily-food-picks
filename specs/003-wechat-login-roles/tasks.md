@@ -5,6 +5,8 @@ description: "Task list for 003-wechat-login-roles"
 
 # Tasks: 微信登录与多用户权限体系
 
+**2026-09-14 接续**：已与采集、新界面在独立本地分支整合，并修复独立审查发现的收藏同步时序问题；未上传、未迁移。验证和下一步统一见[收尾记录](../../docs/operations/2026-09-14-closeout.md)。T070、T073–T076 保持未完成。
+
 **Input**: Design documents from `specs/003-wechat-login-roles/`
 
 **Prerequisites**: [plan.md](plan.md)、[spec.md](spec.md)、[research.md](research.md)、[data-model.md](data-model.md)、[contracts/account-api.md](contracts/account-api.md)、[quickstart.md](quickstart.md)
@@ -202,7 +204,7 @@ description: "Task list for 003-wechat-login-roles"
 
 - [x] T078 [P] 更新 `specs/003-wechat-login-roles/spec.md` 的 Status 栏为实际实施状态，并在 [001 规格](../001-wechat-member-trial/spec.md) 的 FR-023 处标注已被本功能修订
 - [x] T079 [P] 更新 `docs/standards/README.md` 第 2 节的事实来源清单，加入本功能目录
-- [x] T080 [P] 在运行记录中记录 `DFP_CAPTURE_CALLER_FOR_SETUP` 已随 T020 移除，以及 `DFP_ALLOWED_OPENIDS` 已停用的时间
+- [x] T080 [P] 在运行记录中记录 `DFP_CAPTURE_CALLER_FOR_SETUP` 已随 T020 移除；`DFP_ALLOWED_OPENIDS` 尚在迁移窗口使用，停用时间由未完成的 T075 回写，不能提前宣称已清空
 - [x] T081 确认 001 的 T032（指定成员真机验收）状态未被本功能改动，单独跟踪
 
 ---

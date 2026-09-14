@@ -217,7 +217,8 @@ function favoritesHarness(localItems, responses) {
     return typeof reply === 'function' ? reply(params) : reply;
   };
   page._poller = createPoller(async () => {}, { setInterval: () => 1, clearInterval() {} });
-  return { page, calls, local: () => saved };
+  return { page, calls, local: () => saved?.version === 2 ? saved.items : saved,
+    reopen() { page._favorites = createFavorites({ get: () => saved, set: value => { saved = value; } }); } };
 }
 
 test('a local favourite set is merged up once, then the account copy is mirrored down', async () => {
@@ -290,6 +291,113 @@ test('opening the favourites list retries the sync after an outage', async () =>
   await page.loadFavorites();
   assert.deepEqual(calls.map(c => c.action), ['favorites.list'], 'local-only mode is not a one-way trap');
   assert.equal(page._cloudFavorites, true);
+});
+
+test('a reopened device does not restore a synced favourite cancelled on another device', async () => {
+  const responses = {
+    'favorites.list': { items: { [id(1)]: 1000 }, mergedAt: 'already-merged' },
+    'favorites.merge': params => ({ items: params.items, mergedAt: 'already-merged' })
+  };
+  const phoneB = favoritesHarness({}, responses);
+  await phoneB.page.syncFavorites();
+  assert.deepEqual(phoneB.local(), { [id(1)]: 1000 });
+  // Device A has successfully removed the shared favourite on the server.
+  responses['favorites.list'] = { items: {}, mergedAt: 'already-merged' };
+  phoneB.reopen(); phoneB.calls.length = 0;
+  await phoneB.page.syncFavorites();
+  assert.deepEqual(phoneB.calls.map(call => call.action), ['favorites.list']);
+  assert.deepEqual(phoneB.local(), {}, 'the old synced mirror must follow the remote removal');
+});
+
+test('an offline cancellation of a synced item reports that connection is required', async () => {
+  const responses = { 'favorites.list': { items: { [id(1)]: 1000 } } };
+  const phone = favoritesHarness({}, responses);
+  await phone.page.syncFavorites();
+  responses['favorites.list'] = new Error('offline');
+  await phone.page.syncFavorites();
+  const toasts = []; global.wx.showToast = message => toasts.push(message.title);
+  await phone.page.onFavorite({ currentTarget: { dataset: { id: id(1) } } });
+  assert.equal(phone.page._favorites.has(id(1)), true);
+  assert.ok(toasts.some(message => /恢复连接/.test(message)));
+  assert.equal(toasts.includes('已取消收藏'), false);
+});
+
+test('offline additions survive a cold start without reuploading an old synced mirror', async () => {
+  const responses = {
+    'favorites.list': { items: { [id(1)]: 1000 }, mergedAt: 'already-merged' },
+    'favorites.merge': params => ({ items: params.items, mergedAt: 'already-merged' })
+  };
+  const phone = favoritesHarness({}, responses);
+  await phone.page.syncFavorites();
+  responses['favorites.list'] = new Error('offline');
+  await phone.page.syncFavorites();
+  await phone.page.onFavorite({ currentTarget: { dataset: { id: id(2) } } });
+  phone.reopen(); phone.calls.length = 0;
+  responses['favorites.list'] = { items: {}, mergedAt: 'already-merged' };
+  await phone.page.syncFavorites();
+  assert.deepEqual(Object.keys(phone.calls.find(call => call.action === 'favorites.merge').params.items), [id(2)]);
+  assert.deepEqual(Object.keys(phone.local()), [id(2)]);
+});
+
+test('a new local favourite saved during a pending sync is retained for the next sync', async () => {
+  let completeMerge;
+  const mergeStarted = new Promise(resolve => { completeMerge = resolve; });
+  let answer;
+  const phone = favoritesHarness({ [id(1)]: 1000 }, {
+    'favorites.list': { items: {} },
+    'favorites.merge': () => { completeMerge(); return new Promise(resolve => { answer = resolve; }); }
+  });
+  const syncing = phone.page.syncFavorites();
+  await mergeStarted;
+  await phone.page.onFavorite({ currentTarget: { dataset: { id: id(2) } } });
+  answer({ items: { [id(1)]: 1000 } });
+  await syncing;
+  assert.deepEqual(Object.keys(phone.local()).sort(), [id(1), id(2)]);
+  phone.reopen();
+  assert.deepEqual(Object.keys(phone.page._favorites.pendingEntries()), [id(2)]);
+});
+
+test('cancelling a favourite currently being uploaded waits for a retry instead of falsely succeeding', async () => {
+  let started; let answer;
+  const merging = new Promise(resolve => { started = resolve; });
+  const phone = favoritesHarness({ [id(1)]: 1000 }, {
+    'favorites.list': { items: {} },
+    'favorites.merge': () => { started(); return new Promise(resolve => { answer = resolve; }); }
+  });
+  const toasts = []; global.wx.showToast = message => toasts.push(message.title);
+  const syncing = phone.page.syncFavorites();
+  await merging;
+  const secondSync = phone.page.syncFavorites();
+  await phone.page.onFavorite({ currentTarget: { dataset: { id: id(1) } } });
+  assert.equal(phone.page._favorites.has(id(1)), true);
+  assert.ok(toasts.some(message => /同步.*重试/.test(message)));
+  assert.equal(toasts.includes('已取消收藏'), false);
+  answer({ items: { [id(1)]: 1000 } });
+  await Promise.all([syncing, secondSync]);
+  assert.equal(phone.calls.filter(call => call.action === 'favorites.merge').length, 1);
+});
+
+test('sync waits for an earlier cloud cancellation before reading its authoritative state', async () => {
+  let started; let finishWrite; let remote = { [id(1)]: 1000 };
+  const writing = new Promise(resolve => { started = resolve; });
+  const phone = favoritesHarness({}, {
+    'favorites.list': () => ({ items: { ...remote } }),
+    'favorites.toggle': async () => {
+      started(); await new Promise(resolve => { finishWrite = resolve; });
+      remote = {}; return { selected: false };
+    }
+  });
+  await phone.page.syncFavorites(); phone.calls.length = 0;
+  const cancelling = phone.page.onFavorite({ currentTarget: { dataset: { id: id(1) } } });
+  await writing;
+  const syncing = phone.page.syncFavorites();
+  await Promise.resolve(); await Promise.resolve();
+  const readWhileWriting = phone.calls.some(call => call.action === 'favorites.list');
+  finishWrite();
+  await Promise.all([cancelling, syncing]);
+  assert.equal(readWhileWriting, false, 'the sync must not read stale state during a pending write');
+  assert.deepEqual(phone.local(), {});
+  assert.deepEqual(remote, {});
 });
 
 test('an access-level refusal on a favourite write closes the content down', async () => {

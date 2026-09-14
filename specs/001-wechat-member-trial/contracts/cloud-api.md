@@ -16,9 +16,9 @@
 
 ## catalog
 
-所有 action 共用可信身份与单用户白名单校验；无身份返回 `UNAUTHENTICATED`，未获准返回 `FORBIDDEN`。错误不得携带数据或私有图片链接。
+所有 action 共用当前请求可信身份与服务端用户资格校验；003 已替代原单用户白名单，具体见[账号契约](../../003-wechat-login-roles/contracts/account-api.md)。无身份返回 `UNAUTHENTICATED`，未开通返回 `NOT_REGISTERED`，已停用返回 `SUSPENDED`。错误不得携带数据或私有图片链接。
 
-- `status`: 无业务入参，返回当前任务状态、最近可用 revision、snapshotId、scheduledAt、finishedAt、partialReason。
+- `status`: 无业务入参，返回当前任务状态、最近可用 revision、snapshotId、scheduledAt、finishedAt、partialReason。成功搜索但部分覆盖、零入选时为 `partial` 并说明未选出新作品；整体服务失败仍返回失败状态并保留最近可用快照。
 - `listRounds`: 入参 cursor 可空、limit 为 1–20；返回已发布轮次及服务端生成的下一页游标。
 - `getRound`: snapshotId 必须是已发布快照；返回板块、元信息及分页选题。limit 为 1–50，cursor 由服务端生成并绑定查询。常规轮快照可包含当天 06:00 已推荐的今日作品，其 `firstRoundId` 为 06:00 轮，来源见 `coverage.carriedToday`。
 - `search`: query 长度为 1–100 字符，多空白分隔关键词全部命中标题/作者/正文；limit 为 1–50，分页结果按 noteId 去重，采用最新已发布版本。查询按发布批次和 noteId 稳定排序，不能把缺失字段当字符串 undefined。
@@ -31,6 +31,8 @@
 临时图片链接只从本次授权结果中的 fileID 生成，有效期建议 5 分钟；不接受客户端提供的 fileID 请求签名。失败时允许图片占位，不能阻断全部选题读取。
 
 ## 客户端更新与本机收藏
+
+收藏已由 003 扩展为按用户存储，见上述账号契约；本机副本用于首次导入和未上传新增项的恢复，已同步副本不覆盖云端取消操作。
 
 进入/返回页面调用 status；前台每 60 秒检查，离开或后台取消定时器；revision 改变后获取新快照，获取失败时保留旧内容。
 

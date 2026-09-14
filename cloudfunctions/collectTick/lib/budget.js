@@ -112,7 +112,10 @@ async function finishAttempt(store, id, lease, outcome, now) {
       || !['inflight', 'reserved'].includes(record.status)) fail('ATTEMPT_NOT_OWNED');
     await tx.put('dfp_attempts', id, {
       ...record, status: outcome.status, finishedAt: now,
-      errorCode: outcome.errorCode || null, resultRef: outcome.resultRef || null
+      errorCode: outcome.errorCode || null, resultRef: outcome.resultRef || null,
+      httpStatus: integer(outcome.httpStatus, 100, 599) ? outcome.httpStatus : null,
+      providerCode: integer(outcome.providerCode, -2147483648, 2147483647) ? outcome.providerCode : null,
+      providerDataCode: integer(outcome.providerDataCode, -2147483648, 2147483647) ? outcome.providerDataCode : null
     });
     // Reservations never get silently refunded: transport outcomes can be ambiguous.
   });

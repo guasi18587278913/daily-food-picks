@@ -102,7 +102,10 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
     pagesPerQuery: 1, successfulSearches: progress.successfulSearches, candidateCount: progress.candidateIds?.length || rows.length,
     processed: progress.candidateIndex || 0, gaps, notice: round.kind === 'sweep' ? KEYWORDS.dailySweep.coverageNotice : KEYWORDS.coverageNotice,
     ruleVersion: RULES.version };
-  if (!notes.length && (gaps.length || !progress.successfulSearches)) {
+  // A rejected query does not erase completed searches. Total provider failure or an unavailable
+  // classifier still retains the old snapshot; partial discovery can publish an honest zero result.
+  const serviceFailed = ['PROVIDER_AUTH', 'MODEL_UNAVAILABLE'].includes(reason);
+  if (!notes.length && (!progress.successfulSearches || serviceFailed)) {
     const status = finishStatus(reason);
     await store.transaction(async tx => {
       await assertLease(tx, lease, clock());
@@ -120,7 +123,8 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
   const carryGaps = !carryError ? [] : [['SWEEP_MISSING', 'SWEEP_NOT_PUBLISHED'].includes(carryError) ? 'SWEEP_UNAVAILABLE' : 'CARRY_UNAVAILABLE'];
   const publishedGaps = [...gaps, ...carryGaps];
   const result = await publish({ store, lease, round, notes, carriedNotes: carried.notes, status: publishedGaps.length ? 'partial' : 'complete',
-    coverage: { ...coverage, gaps: publishedGaps, carriedToday: carried.summary }, partialReason: describeGaps(publishedGaps),
+    coverage: { ...coverage, gaps: publishedGaps, carriedToday: carried.summary },
+    partialReason: (!notes.length && publishedGaps.length ? '本轮已扫描，但未选出新作品。' : '') + describeGaps(publishedGaps),
     successfulSearches: progress.successfulSearches, clock });
   return { roundId: round.id, status: result.status, snapshotId: result.id };
 }
