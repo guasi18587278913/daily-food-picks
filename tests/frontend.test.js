@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createApi, createPoller, shouldFollowLatest, copySource } = require('../miniprogram/lib/api');
+const { createApi, createPoller, shouldFollowLatest } = require('../miniprogram/lib/api');
 const { createFavorites } = require('../miniprogram/lib/favorites');
 const { formatMetric, sortNotes } = require('../miniprogram/lib/view');
 const id = n => String(n).padStart(24, '0');
@@ -44,16 +44,6 @@ test('null metrics stay unknown and sorting is stable, with unknown values last'
   const rows = [{ noteId: id(3), likes: null }, { noteId: id(2), likes: 0 }, { noteId: id(1), likes: 0 }];
   assert.deepEqual(sortNotes(rows, 'likes').map(x => x.noteId), [id(1), id(2), id(3)]);
   assert.deepEqual(sortNotes([{ noteId: id(1), ratio: 2 }, { noteId: id(2), ratio: 5 }], 'ratio').map(x => x.noteId), [id(2), id(1)]);
-});
-test('copy only reports success after the native callback and rejects unsafe or missing links', async () => {
-  let requested;
-  const result = copySource(`https://www.xiaohongshu.com/explore/${id(1)}`, options => { requested = options; });
-  let done = false; result.then(() => { done = true; });
-  await Promise.resolve(); assert.equal(done, false);
-  requested.success(); await result; assert.equal(done, true);
-  await assert.rejects(copySource('javascript:alert(1)', () => {}));
-  await assert.rejects(copySource(null, () => {}));
-  await assert.rejects(copySource(`https://www.xiaohongshu.com/explore/${id(1)}`, options => options.fail()));
 });
 
 function pageHarness() {

@@ -1,5 +1,5 @@
 'use strict';
-const { createApi, createPoller, shouldFollowLatest, copySource } = require('../../lib/api');
+const { createApi, createPoller, shouldFollowLatest } = require('../../lib/api');
 const { createFavorites } = require('../../lib/favorites');
 const { boards, card, formatTime } = require('../../lib/view');
 const { canOpenOriginal, openOriginal } = require('../../lib/source');
@@ -340,18 +340,8 @@ Page({
       // A successful request does not prove the destination displayed its contents. Do not show a false success toast.
       await openOriginal(note, options => wx.navigateToMiniProgram(options));
     } catch {
-      wx.showModal({ title: '暂时无法打开原笔记', content: '可以复制原文链接，到浏览器或小红书中查看。',
-        confirmText: '复制链接', cancelText: '取消', confirmColor: '#B8441A',
-        success: result => { if (result.confirm) void this.onCopy(event); } });
+      wx.showToast({ title: '原文暂不可直达，请稍后再试。', icon: 'none' });
     } finally { this._sourceOpening = false; }
-  },
-  /** @param {{currentTarget:{dataset:Record<string,string>}}} event */
-  async onCopy(event) {
-    const note = this._notes.find(x => x.noteId === event.currentTarget.dataset.id);
-    try {
-      await copySource(note?.sourceUrl || null, options => wx.setClipboardData(options));
-      wx.showModal({ title: '原文链接已复制', content: '可以粘贴到浏览器查看原文。小红书可能要求登录，内容也可能已被作者删除。', showCancel: false, confirmText: '知道了', confirmColor: '#B8441A' });
-    } catch (e) { wx.showToast({ title: /** @type {Error} */ (e).message, icon: 'none' }); }
   },
   /** @param {{currentTarget:{dataset:Record<string,string>}}} event */
   onImageError(event) {

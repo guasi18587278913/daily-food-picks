@@ -48,11 +48,4 @@ function createPoller(check, timers = { setInterval, clearInterval }) {
 }
 /** @param {{mode:string,snapshotId:string|null}} view @param {string|null} previousLatest */
 function shouldFollowLatest(view, previousLatest) { return view.mode === 'round' && (!view.snapshotId || view.snapshotId === previousLatest); }
-/** @param {string|null} url @param {(options:{data:string,success:()=>void,fail:()=>void})=>unknown} setClipboard @returns {Promise<void>} */
-function copySource(url, setClipboard) {
-  if (typeof url !== 'string' || !/^https:\/\/(?:www\.)?xiaohongshu\.com\/(?:explore|discovery\/item)\/[0-9a-f]{24}(?:\?[^\s]*)?$/.test(url)) {
-    return Promise.reject(new Error('这篇内容暂时没有可用原文链接。'));
-  }
-  return new Promise((resolve, reject) => setClipboard({ data: url, success: resolve, fail: () => reject(new Error('复制失败，请再试一次。')) }));
-}
-module.exports = { createApi, createPoller, shouldFollowLatest, copySource, MESSAGES };
+module.exports = { createApi, createPoller, shouldFollowLatest, MESSAGES };

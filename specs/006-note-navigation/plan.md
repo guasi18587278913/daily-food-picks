@@ -10,8 +10,8 @@ Spec: [spec.md](spec.md)；状态见tasks.md。原生微信小程序、Node20.19
 
 - shared/source-navigation.js：纯校验与链接目录合并，作为前后端共享源；prepare:functions复制到miniprogram/catalog，生成副本不手改。
 - dfp_state/source_navigation_v1：单个受大小限制的目录，最多100条，每次读取最多一条文档；值包含noteId、shortLink、confirmedAt、可选expiresAt。只有受信运维工具写入，无客户端修改接口。
-- catalog/lib/queries.js：完成原授权与选题查询后，单次读目录，仅装饰返回笔记；缺失/异常以状态表达并保留网页复制能力，不重写快照。
-- miniprogram/lib/source.js与首页：原样传shortLink调用wx.navigateToMiniProgram。取消静默、其他错误提供复制选择；旧onCopy保留。卡片展示按已校验的入口选择按钮文字。
+- catalog/lib/queries.js：完成原授权与选题查询后，单次读目录，仅装饰返回笔记；缺失/异常以状态表达并保留选题展示，不重写快照。
+- miniprogram/lib/source.js与首页：原样传shortLink调用wx.navigateToMiniProgram。取消静默、其他错误仅提示不可直达；按用户新指令删除来源复制入口及实现。卡片展示按已校验的入口选择按钮文字。
 - scripts/register-note-links.js：私有JSON输入，校验对应笔记确实已发布、来源确认及目录版本，事务合并；拒绝未确认/重复短码对应不同笔记。只有带明确apply才写，不输出短链或凭据。
 
 单文档最多100条/120KB是初期边界；当前可自动获取的短链接数未知，不建隐含收费的转换服务。目录和写入工具只能解决分发与可靠绑定，不能冒充自动来源。自动来源调查为独立待办。
