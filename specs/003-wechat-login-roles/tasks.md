@@ -5,7 +5,7 @@ description: "Task list for 003-wechat-login-roles"
 
 # Tasks: 微信登录与多用户权限体系
 
-**2026-09-14 接续**：已与采集、新界面在独立本地分支整合，并修复收藏同步时序问题；用户随后明确授权上传与迁移，0.1.2开发版本已上传、T073/T074已完成。验证和下一步统一见[收尾记录](../../docs/operations/2026-09-14-closeout.md)。T070、T075、T076保持未完成。
+**2026-09-14 接续**：已与采集、新界面整合并修复收藏同步时序问题；0.1.2已确认为体验版，管理员建立、原名单迁移、关闭回落和关闭后读取复验完成，T073–T075已完成。验证和下一步见[收尾记录](../../docs/operations/2026-09-14-closeout.md)。T070和T076保持未完成。
 
 **Input**: Design documents from `specs/003-wechat-login-roles/`
 
@@ -194,7 +194,7 @@ description: "Task list for 003-wechat-login-roles"
 - [x] T072 部署带迁移窗口回落的 `account` 与 `catalog` 版本；在云端为 `dfp_users`、`dfp_invites`、`dfp_favorites`、`dfp_redeem_attempts`、`dfp_access_log` 设置 ADMINONLY 权限并回读确认
 - [x] T073 配置 `DFP_BOOTSTRAP_ADMIN_OPENID` 为维护账号身份，用该账号打开一次确认被建为 admin 且管理入口出现。9/14 10:46通过微信开发者工具真实身份完成，account.me返回active/admin；手机验收仍由T076跟踪
 - [x] T074 调用 `admin.migrateWhitelist` 执行迁移，回读确认原白名单身份均已有用户记录，并在运行记录写明迁移时间与 `{created, skipped, total}`。9/14 10:49结果为0/1/1；原名单1个身份逐项匹配，唯一active admin保留
-- [ ] T075 部署去掉回落分支的版本，清空云函数环境变量 `DFP_ALLOWED_OPENIDS`，确认已迁移用户仍可正常使用
+- [x] T075 关闭服务端回落分支，清空云函数环境变量 `DFP_ALLOWED_OPENIDS`，确认已迁移用户仍可正常使用。9/14核对两端线上名单均为1人且与已迁移记录匹配后，将两端`DFP_MIGRATION_FALLBACK`设为false，并移除旧名单变量（控制台不允许空值）。SCF回读均Active、其他变量保留；关闭后真实account.me仍admin，catalog读到2条选题。本地私有配置已同步；不把配置更新称为重新发布代码
 - [ ] T076 按 [quickstart.md](quickstart.md)「云端验证」8 项逐项执行并把真实结果写入运行记录：引导管理员、生成码、未开通账号只见引导、开通、码用尽被拒、停用与恢复、收藏跨设备、最后一个 admin 保护。**模拟器结果不能替代真机**
 - [x] T077 本功能属高风险（权限、身份隔离、数据迁移、改动超过 10 个文件），安排独立审查：核对逻辑、安全、现有约定与多余改动；修复阻塞项后复审受影响部分
 
