@@ -5,9 +5,9 @@
   ],
   "window": {
     "navigationBarTitleText": "深夜食堂选题台",
-    "navigationBarBackgroundColor": "#f7f3eb",
+    "navigationBarBackgroundColor": "#F6F4F0",
     "navigationBarTextStyle": "black",
-    "backgroundColor": "#f7f3eb",
+    "backgroundColor": "#F6F4F0",
     "backgroundTextStyle": "dark",
     "enablePullDownRefresh": true
   },
