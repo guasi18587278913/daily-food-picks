@@ -1,5 +1,7 @@
 # 005 多入口发现与视频复核：开发交接
 
+最新生产配置（19:44）：视觉每轮最多20次、每日0.50元；TikHub日250、100/50/50/50不变，源码bad4f6d。见[视觉上限更新](005-vision-limit-20.md)。下文保留早先阶段的实测事实。
+
 日期：2026-09-14。工作树 `美食博主工作台-discovery-vision`，分支 `feature/adaptive-discovery-vision`，基线 `82368a7`。本会话为唯一主要写入者；审查者只读。
 
 ## 完成与未完成
@@ -27,7 +29,7 @@
 DFP_DISCOVERY_MODE=adaptive
 DFP_VISION_ENABLED=true
 DFP_VISION_DAILY_MICRO_CNY=500000
-DFP_VISION_ROUND_CALLS=3
+DFP_VISION_ROUND_CALLS=20
 DFP_VISION_KEY=<服务器私有VITA密钥>
 ```
 
