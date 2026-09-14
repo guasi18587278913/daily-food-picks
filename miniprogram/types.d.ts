@@ -16,6 +16,8 @@ interface FoodNote {
   boards: BoardKey[];
   thumbUrl: string | null;
   sourceUrl: string | null;
+  sourceNavigation?: { noteId: string; shortLink: string } | null;
+  sourceNavigationState?: 'ready' | 'missing' | 'unavailable';
 }
 interface RoundItem { snapshotId: string; scheduledAt: string; status: string; count: number; label?: string }
 interface RoundData {

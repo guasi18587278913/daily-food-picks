@@ -1,6 +1,7 @@
 'use strict';
 const { createHash } = require('node:crypto');
 const { authorize } = require('./access');
+const { validRegistry, navigationFor } = require('./source-navigation');
 const NOTE_ID = /^[0-9a-f]{24}$/;
 const SNAPSHOT_ID = /^\d{8}-\d{4}-[0-9a-f]{12}$/;
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -28,7 +29,7 @@ const ERRORS = {
   INVALID_ARGUMENT: '请求内容不正确，请重试。', INVALID_CURSOR: '列表已变化，请重新查询。',
   NOT_FOUND: '这轮内容暂不可用。', BACKEND_UNAVAILABLE: '服务暂时不可用，稍后再试。'
 };
-function createCatalog({ store, config, sign = async () => [] }) {
+function createCatalog({ store, config, sign = async () => [], clock = Date.now }) {
   // `seen` is created per invocation and released with it, so a publish during the next call is never masked.
   async function published(id, seen) {
     if (!id) return false;
@@ -36,12 +37,23 @@ function createCatalog({ store, config, sign = async () => [] }) {
     return seen.get(id);
   }
   async function decorate(notes) {
+    if (!notes.length) return [];
+    let registry = null, registryState = 'missing';
+    try {
+      registry = await store.get('dfp_state', 'source_navigation_v1');
+      if (registry) registryState = validRegistry(registry, clock()) ? 'ready' : 'unavailable';
+    } catch { registryState = 'unavailable'; }
     const fileIds = [...new Set(notes.map(n => n.fileId).filter(x => typeof x === 'string' && x.startsWith('cloud://')))];
     let urls = [];
     try { if (fileIds.length) urls = await sign(fileIds); } catch {}
     const map = new Map(urls.filter(x => fileIds.includes(x.fileID) && /^https:\/\//.test(x.tempFileURL || '') && (!x.status || x.status === 0))
       .map(x => [x.fileID, x.tempFileURL]));
-    return notes.map(note => { const { fileId, ...rest } = note; return { ...rest, thumbUrl: map.get(fileId) || null }; });
+    return notes.map(note => {
+      const { fileId, ...rest } = note;
+      const navigation = registryState === 'ready' ? navigationFor(registry, note.noteId, clock()) : null;
+      return { ...rest, thumbUrl: map.get(fileId) || null, sourceNavigation: navigation,
+        sourceNavigationState: navigation ? 'ready' : registryState === 'unavailable' ? 'unavailable' : 'missing' };
+    });
   }
   async function latestNote(noteId, seen) {
     const ref = await store.get('dfp_candidates', `published_${noteId}`);

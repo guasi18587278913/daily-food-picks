@@ -15,7 +15,11 @@
     </view>
     <view class="card-actions">
       <button class="favorite {{note.favorite ? 'saved' : ''}}" data-id="{{note.noteId}}" bindtap="onFavorite" aria-label="{{note.favorite ? '取消收藏' : '收藏选题'}}"><view class="favorite-pill"><text class="icon {{note.favorite ? 'icon-star-filled' : 'icon-star'}}"></text><text>{{note.favorite ? '已收藏' : '收藏'}}</text></view></button>
-      <button class="source" data-id="{{note.noteId}}" bindtap="onCopy" aria-label="复制原文链接"><text class="icon icon-copy"></text><text>复制原文</text></button>
+      <view class="source-actions">
+        <button wx:if="{{note.canOpenSource}}" class="source" data-id="{{note.noteId}}" bindtap="onOpenSource" aria-label="查看原笔记"><text class="icon icon-arrow"></text><text>查看原笔记</text></button>
+        <button wx:else class="source" data-id="{{note.noteId}}" bindtap="onCopy" aria-label="复制原文链接"><text class="icon icon-copy"></text><text>复制链接</text></button>
+        <button wx:if="{{note.canOpenSource}}" class="source source-secondary" data-id="{{note.noteId}}" bindtap="onCopy" aria-label="复制原文链接">复制链接</button>
+      </view>
     </view>
   </view>
 </template>

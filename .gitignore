@@ -1,4 +1,7 @@
 node_modules/
+node_modules
+miniprogram/lib/source-navigation.js
+cloudfunctions/catalog/lib/source-navigation.js
 dist/
 coverage/
 tmp/

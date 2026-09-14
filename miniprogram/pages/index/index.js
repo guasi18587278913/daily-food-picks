@@ -2,6 +2,7 @@
 const { createApi, createPoller, shouldFollowLatest, copySource } = require('../../lib/api');
 const { createFavorites } = require('../../lib/favorites');
 const { boards, card, formatTime } = require('../../lib/view');
+const { canOpenOriginal, openOriginal } = require('../../lib/source');
 const STORAGE_KEY = 'food-picks:favorites:v2';
 const LEGACY_STORAGE_KEY = 'food-picks:favorites:v1';
 
@@ -36,6 +37,7 @@ Page({
   _syncingFavoriteIds: /** @type {string[]} */ ([]),
   _returnMode: 'round',
   _visible: false,
+  _sourceOpening: false,
   onLoad() {
     this._favorites = createFavorites({ get: () => {
       const current = wx.getStorageSync(STORAGE_KEY);
@@ -326,6 +328,22 @@ Page({
     }
     this.renderNotes();
     wx.showToast({ title: selected ? '已收藏' : '已取消收藏', icon: 'none' });
+  },
+  /** @param {{currentTarget:{dataset:Record<string,string>}}} event */
+  async onOpenSource(event) {
+    if (this._sourceOpening) return;
+    const note = this._notes.find(x => x.noteId === event.currentTarget.dataset.id);
+    if (!note) { wx.showToast({ title: '这条选题已更新，请刷新后重试。', icon: 'none' }); return; }
+    this._sourceOpening = true;
+    try {
+      if (!canOpenOriginal(note)) throw new Error('SOURCE_LINK_UNAVAILABLE');
+      // A successful request does not prove the destination displayed its contents. Do not show a false success toast.
+      await openOriginal(note, options => wx.navigateToMiniProgram(options));
+    } catch {
+      wx.showModal({ title: '暂时无法打开原笔记', content: '可以复制原文链接，到浏览器或小红书中查看。',
+        confirmText: '复制链接', cancelText: '取消', confirmColor: '#B8441A',
+        success: result => { if (result.confirm) void this.onCopy(event); } });
+    } finally { this._sourceOpening = false; }
   },
   /** @param {{currentTarget:{dataset:Record<string,string>}}} event */
   async onCopy(event) {
