@@ -5,6 +5,7 @@ const root = path.resolve(__dirname, '..');
 const copies = [
   ['config/rules.json', 'cloudfunctions/collectTick/config/rules.json'],
   ['config/keywords.json', 'cloudfunctions/collectTick/config/keywords.json'],
+  ['config/discovery.json', 'cloudfunctions/collectTick/config/discovery.json'],
   ['cloudfunctions/collectTick/lib/store.js', 'cloudfunctions/catalog/lib/store.js'],
   ['cloudfunctions/collectTick/lib/context.js', 'cloudfunctions/catalog/lib/context.js'],
   ['cloudfunctions/collectTick/lib/store.js', 'cloudfunctions/account/lib/store.js'],

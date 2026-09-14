@@ -1,0 +1,12 @@
+{
+  "version": "9.0.1",
+  "platform": "linux-x64",
+  "source": "https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz",
+  "sourceSha256": "cf38e0e28c7e5605942c4a77755349b0145804a397af37eb1fb4c77cb237f635",
+  "signingFingerprint": "FCF986EA15E6E293A5644F10B4322F04D67658D8",
+  "builder": "alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce",
+  "binaries": {
+    "ffmpeg": "e9f96367cd6dddbb16baeb92e6bf45b80b6a7451fe3e32b4114c7624c3cacf01",
+    "ffprobe": "af30f3cb05f07099160f46ea4f5b0cd9967e51d842654a9a3069a199aea2f26a"
+  }
+}

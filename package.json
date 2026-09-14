@@ -17,7 +17,10 @@
     "typecheck:mini": "tsc -p jsconfig.json",
     "check:package": "node scripts/check-package.js",
     "release": "node scripts/release.js",
-    "check:sync": "node scripts/check-sync.js"
+    "check:sync": "node scripts/check-sync.js",
+    "prepare:media": "node scripts/prepare-media.js",
+    "check:reuse-cost": "node scripts/validate-reuse-cost.js",
+    "check:package:vision": "node scripts/check-package.js --with-vision"
   },
   "devDependencies": {
     "miniprogram-api-typings": "5.2.3",

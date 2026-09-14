@@ -18,6 +18,7 @@ __pycache__/
 .venv/
 .DS_Store
 cloudfunctions/collectTick/config/
+cloudfunctions/collectTick/bin/
 cloudfunctions/catalog/lib/store.js
 cloudfunctions/catalog/lib/context.js
 cloudfunctions/catalog/lib/access.js

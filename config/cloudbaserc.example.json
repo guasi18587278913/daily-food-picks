@@ -20,7 +20,12 @@
         "DFP_VALIDATION_MICRO_USD": "",
         "DFP_FREE_AI_CONFIRMED": "false",
         "DFP_AI_PROVIDER": "hunyuan-v3",
-        "DFP_AI_MODEL": "hy3"
+        "DFP_AI_MODEL": "hy3",
+        "DFP_DISCOVERY_MODE": "legacy",
+        "DFP_VISION_ENABLED": "false",
+        "DFP_VISION_KEY": "",
+        "DFP_VISION_DAILY_MICRO_CNY": "500000",
+        "DFP_VISION_ROUND_CALLS": "3"
       },
       "triggers": []
     },

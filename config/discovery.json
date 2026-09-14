@@ -1,0 +1,11 @@
+{
+  "version": "2026-09-14-adaptive-1",
+  "discoveryCalls": { "sweep": 18, "regular": 4 },
+  "candidateTarget": { "sweep": 12, "regular": 10 },
+  "maxCandidates": 40,
+  "maxTasks": 64,
+  "maxSources": 100,
+  "sourceTtlMs": 604800000,
+  "cooldownMs": 21600000,
+  "foodHints": ["美食", "做饭", "料理", "食谱", "家宴", "烘焙", "一锅", "甜品", "甜食", "饮品", "早餐", "三餐", "布朗尼", "蛋糕", "饼干", "面包", "面条", "吐司", "三明治", "火腿", "咖啡", "冰激凌", "冰淇淋", "巧克力", "鸡肉", "牛肉", "猪肉", "虾", "豆腐", "南瓜", "土豆", "山药", "排骨", "煲汤", "糖水", "面食", "辅食", "recipe", "cooking", "baking", "dessert"]
+}

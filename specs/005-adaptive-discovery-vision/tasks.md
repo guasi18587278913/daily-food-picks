@@ -1,0 +1,65 @@
+# Tasks: 多入口发现与视频复核
+
+基线 `82368a7`；主要写入者为本会话。阶段结果和验证绑定当前提交或工作区，不把文档完成当实现完成。
+
+## Phase 1：准备与基础
+
+- [x] T001 保存既有实测证据，建立独立工作树及 specs/005-adaptive-discovery-vision/spec.md、plan.md、research.md、data-model.md、contracts/collection.md、quickstart.md
+- [x] T002 对 specs/005-adaptive-discovery-vision/ 的需求、模块、费用及恢复方案做独立审查，修复重要问题
+
+## Phase 2：US1 统一发现入口
+
+- [x] T003 [US1] 在 tests/discovery-provider.test.js 覆盖热点/灵感/话题/公开收藏的真实结构、错误标识、缺值、视频及话题标识解析
+- [x] T004 [US1] 扩展 cloudfunctions/collectTick/lib/provider.js 与 budget.js 的允许接口及有界媒体信息，保持原接口契约
+- [x] T005 [US1] 在 tests/discovery.test.js 定义有界派生、元数据到作品、来源公平机会、候选去重与统计行为
+- [x] T006 [US1] 实现 cloudfunctions/collectTick/lib/discovery.js 和 config/discovery.json 的六入口安排与来源池
+- [x] T007 [US1] 在 cloudfunctions/collectTick/lib/runner.js 接入持久化发现任务、附带作品候选、40上限和细查留额，补 tests/adaptive-runner.test.js
+
+## Phase 3：US3 复用与成本
+
+- [x] T008 [US3] 在 tests/reuse.test.js 覆盖有效期、未来时间、规则/内容变更、明确新发现、旧工作者及重复调用
+- [x] T009 [US3] 实现 cloudfunctions/collectTick/lib/reuse.js 并接入 provider/runner 的详情、作者和判断复用
+- [x] T010 [US3] 对同批候选做可重复费用对照，记录输出一致与详情/判断重复请求节省，保存到 docs/operations/005-cost-validation.md
+
+## Phase 4：US2 视频与视觉
+
+- [x] T011 [US2] 在 tests/video.test.js 定义允许域名、非MP4、字节/时长/进程上限、帧顺序及清理，再实现 cloudfunctions/collectTick/lib/video.js
+- [x] T012 [US2] 准备固定版本 Linux FFmpeg 依赖及摘要，补 scripts/check-package.js 的部署核对；本地真实两段素材抽帧，保存实际结果
+- [x] T013 [US2] 取得视觉费用授权并核对可用直接 VITA 账号/私有密钥/模型/价格；记录私有配置状态，不将凭据入库
+- [x] T014 [US2] 在 tests/vision-budget.test.js 覆盖缺授权/报价、并发、日/轮/首验、重复、已知结算、失败与未知，再实现 lib/vision-budget.js
+- [x] T015 [US2] 在 tests/vision.test.js 覆盖实际图像输入、帧证据、输入输出上限及错误，再实现 lib/vision.js
+- [x] T016 [US2] 在 runner.js/index.js/config.js 接入文字不确定视频的自动复核与判断缓存，保留失败和覆盖信息
+- [ ] T017 [US2] 按批准上限做真实模型对照：两段已知漏收及非制作/不可读对照；不得只发图像的文字描述或重复问到满意，记录实际费用
+
+## Phase 5：US4 兼容、审查与上线
+
+- [x] T018 [US4] 补 tests/adaptive-runner.test.js 的预算停止、服务失败、恢复、发布、旧模式和读取零收费回归；更新配置版本及生成副本
+- [x] T019 [US4] 更新运行说明和费用汇总，验证原权限/发布边界与包检查；必要前端字段变化才增加类型检查
+- [x] T020 对最终跨模块代码和验证做独立审查，修复后复审受影响部分
+- [ ] T021 形成确定源码、Linux包、配置差异和真实验证的部署候选；取得相应上线确认后部署并核对关键链路，不覆盖其他任务
+- [ ] T022 记录新模式第一次真实轮次及后续观察安排；001 的 T042/T048 不由离线回放或本地看图替代
+
+## Dependencies and execution
+
+T003→T004；T005→T006→T007；T008→T009→T010。视频提取与视觉协议可在相同工作树不同文件中分阶段完成，当前由主会话串行写入；独立审查者只读。
+
+T013 未完成前不发起付费视觉请求，但 T003–T012、T014–T016 的本地实现与不付费测试可继续。T017 与代码审查完成后才准备部署候选。每阶段只跑受影响检查，不反复执行全量测试。
+
+## Requirements coverage
+
+- FR001/002/004/005/007 → T003–T007
+- FR006/008 → T008–T010
+- FR009/010 → T011/012/015–T017
+- FR011/012/013 → T013/014/016/018
+- FR003/014/015 → T007/018–T022
+- SC001 → T003–T007；SC002 → T017；SC003 → T010；SC004 → T008/014/018；SC005 → T017/020–T022
+
+## Authorization status
+
+已授权：接入六种方式、探索省钱方案、本地实现与相关检查。
+已授权：视觉每轮最多3次、每日0.50元；首验最多6次/0.20元。用户回复“这个允许”。直接VITA已开通，私有密钥已取得；首验6次已用完，实际0.010813元，SC-002未通过。
+未自动执行：上线、充值、提升原数据请求日预算、额外账户订阅。
+
+## 当前验证状态（2026-09-14）
+
+T017已执行6次真实请求并对账，但最终已测V2仍漏掉一锅出，故不勾选；当前V3独立六帧请求仅通过本地检查，尚未获追加次数授权。T020跨模块5项修复及V3局部修复已复审通过，打包核查发现默认关闭模式误强制解码器，已修复并复审通过。T021/T022未开始；线上保持旧模式。详细证据见 `docs/operations/005-handoff.md`、`005-cost-validation.md`、`005-vision-validation.md`。

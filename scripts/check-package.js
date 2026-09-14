@@ -1,6 +1,7 @@
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 const root = path.resolve(__dirname, '..');
 const mini = path.join(root, 'miniprogram');
 let count = 0; let size = 0;
@@ -23,6 +24,7 @@ if (size >= 2 * 1024 * 1024) throw new Error('Mini program exceeds the 2 MiB mai
 for (const [a, b] of [
   ['config/rules.json', 'cloudfunctions/collectTick/config/rules.json'],
   ['config/keywords.json', 'cloudfunctions/collectTick/config/keywords.json'],
+  ['config/discovery.json', 'cloudfunctions/collectTick/config/discovery.json'],
   ['cloudfunctions/collectTick/lib/store.js', 'cloudfunctions/catalog/lib/store.js'],
   ['cloudfunctions/collectTick/lib/context.js', 'cloudfunctions/catalog/lib/context.js'],
   ['cloudfunctions/collectTick/lib/store.js', 'cloudfunctions/account/lib/store.js'],
@@ -38,4 +40,19 @@ const cloud = JSON.parse(fs.readFileSync(path.join(root, 'config/cloudbaserc.exa
 for (const fn of cloud.functions) {
   for (const file of ['index.js', 'package.json']) if (!fs.existsSync(path.join(root, cloud.functionRoot, fn.name, file))) throw new Error('Cloud function directory does not resolve from repository root');
 }
-console.log(JSON.stringify({ checksPassed: 10, checksFailed: 0, clientFiles: count, clientBytes: size, maxBytes: 2 * 1024 * 1024 }));
+const media = require('../config/media-decoder.json');
+let mediaBytes = 0;
+const mediaDirectory = path.join(root, 'cloudfunctions/collectTick/bin');
+const validateMedia = process.argv.includes('--with-vision') || fs.existsSync(mediaDirectory);
+if (validateMedia) for (const [name, hash] of Object.entries(media.binaries)) {
+  const file = path.join(root, 'cloudfunctions/collectTick/bin', name), bytes = fs.readFileSync(file);
+  if (createHash('sha256').update(bytes).digest('hex') !== hash || !(fs.statSync(file).mode & 0o111)) throw Error('Missing or unverified Linux decoder; run prepare-media.js');
+  mediaBytes += bytes.length;
+}
+if (validateMedia) {
+  for (const name of ['COPYING.LGPLv2.1', 'LICENSE.md', 'manifest.json']) if (!fs.existsSync(path.join(mediaDirectory, name))) throw Error('Missing media license or manifest');
+  if (!fs.readFileSync(path.join(mediaDirectory, 'manifest.json')).equals(fs.readFileSync(path.join(root, 'config/media-decoder.json')))) throw Error('Stale media manifest');
+}
+if (mediaBytes > 12 * 1024 * 1024) throw Error('Media dependency exceeds package allocation');
+console.log(JSON.stringify({ checksPassed: validateMedia ? 12 : 10, checksFailed: 0, clientFiles: count, clientBytes: size, mediaBytes,
+  visualPackageVerified: validateMedia, maxBytes: 2 * 1024 * 1024 }));

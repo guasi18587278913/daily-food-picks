@@ -3,9 +3,12 @@
 const { createHash } = require('node:crypto');
 const { PRICE_URL, PRICE_MICRO_USD, reserveAttempt, markInflight, finishAttempt } = require('./budget');
 const { error } = require('./config');
+const { cacheKey, readCache, writeCache, maximumAge, mergeDetail } = require('./reuse');
 const BASE = 'https://api.tikhub.io/api/v1/xiaohongshu/app_v2/';
 const ENDPOINTS = Object.freeze({ search: 'search_notes', author: 'get_user_posted_notes',
-  user: 'get_user_info', note_video: 'get_video_note_detail', note_image: 'get_image_note_detail' });
+  user: 'get_user_info', note_video: 'get_video_note_detail', note_image: 'get_image_note_detail',
+  hot: 'get_creator_hot_inspiration_feed', inspiration: 'get_creator_inspiration_feed',
+  topic: 'get_topic_feed', faved: 'get_user_faved_notes' });
 const ID = /^[0-9a-f]{24}$/;
 const metric = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
 const text = (value, max) => typeof value === 'string' ? value.slice(0, max) : '';
@@ -31,11 +34,75 @@ function imageUrl(value) {
   return null;
 }
 function publishedTime(raw) {
-  const n = raw.timestamp ?? raw.create_time ?? raw.time;
+  const n = raw.timestamp ?? raw.create_time ?? raw.time ?? raw.note_time?.create_time;
   if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) return null;
   const ms = n > 1e11 ? n : n * 1000;
   if (!Number.isSafeInteger(ms) || ms > 8640000000000000) return null;
   return new Date(ms).toISOString();
+}
+function topicPage(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'xhsdiscover:' && !(url.protocol === 'https:'
+      && ['www.xiaohongshu.com', 'xiaohongshu.com'].includes(url.hostname))) return null;
+    const candidate = url.searchParams.get('id') || url.pathname.split('/').filter(Boolean).at(-1);
+    return ID.test(candidate || '') ? candidate : null;
+  } catch { return null; }
+}
+function topicsOf(raw) {
+  const rows = [raw.hash_tag, raw.hash_tags, raw.topics].filter(Array.isArray).flat().slice(0, 40);
+  const topics = new Map();
+  for (const item of rows) {
+    const pageId = ID.test(item?.page_id || '') ? item.page_id : topicPage(item?.link);
+    const label = text(item?.name || item?.title, 120);
+    if (pageId && label) topics.set(pageId, { pageId, label });
+  }
+  return [...topics.values()].slice(0, 20);
+}
+function mediaUrl(value) {
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.href.length > 4000
+      || !/(^|\.)(xhscdn\.com|rednotecdn\.com)$/.test(url.hostname)) return null;
+    url.protocol = 'https:'; return url.href;
+  } catch { return null; }
+}
+function mediaOf(raw) {
+  if (raw.type !== 'video') return null;
+  const media = raw.video_info_v2?.media;
+  const streamGroups = media?.stream || {};
+  const streams = Object.values(streamGroups).filter(Array.isArray).flat().slice(0, 40)
+    .map(s => ({ url: mediaUrl(s?.master_url), bytes: metric(s?.size) }))
+    .filter(s => s.url && s.bytes > 0 && s.bytes <= 32 * 1024 * 1024)
+    .sort((a, b) => a.bytes - b.bytes);
+  if (!streams.length) return null;
+  const duration = media?.video?.duration;
+  const durationMs = Number.isFinite(duration) && duration > 0 ? Math.ceil(duration * 1000) : null;
+  const chosen = streams[0];
+  const contentId = /^[a-f0-9]{32}$/i.test(media?.video?.md5 || '')
+    ? media.video.md5.toLowerCase() : new URL(chosen.url).pathname;
+  return { ...chosen, durationMs, identity: digest(contentId) };
+}
+function metadataSignals(kind, inner) {
+  const rows = kind === 'hot' ? inner.items : inner.inspirations;
+  if (!Array.isArray(rows)) throw error('PROVIDER_SCHEMA');
+  const signals = rows.slice(0, 60).map(row => {
+    let pageId = ID.test(row?.page_id || '') ? row.page_id : null;
+    if (!pageId && kind === 'inspiration') {
+      try {
+        const link = new URL(row?.post_deeplink);
+        if (link.protocol === 'xhsdiscover:') {
+          const attach = JSON.parse(link.searchParams.get('attach') || '{}');
+          const id = attach.topics?.[0]?.page_id;
+          if (ID.test(id || '')) pageId = id;
+        }
+      } catch {}
+    }
+    return { label: text(row?.title || row?.name, 120), pageId,
+      signalType: text(row?.type, 40), displayMetric: text(row?.score_text || row?.cnt_desc, 120) };
+  }).filter(x => x.label);
+  if (rows.length && !signals.length) throw error('PROVIDER_SCHEMA');
+  return signals;
 }
 function normalizeNote(raw, { source = 'search', fetchedAt = Date.now(), authorId = null } = {}) {
   if (!raw || typeof raw !== 'object') return null;
@@ -54,15 +121,17 @@ function normalizeNote(raw, { source = 'search', fetchedAt = Date.now(), authorI
   if (!link && typeof raw.xsec_token === 'string' && raw.xsec_token.length < 1000) {
     link = `https://www.xiaohongshu.com/explore/${noteId}?xsec_token=${encodeURIComponent(raw.xsec_token)}&xsec_source=pc_search`;
   }
+  const topics = topicsOf(raw), media = mediaOf(raw), interaction = raw.interaction_info || {};
   return { noteId, authorId: uid, title, desc, type: raw.type, author: text(user.nickname || user.name, 120),
-    publishedAt: publishedTime(raw), likes: metric(raw.liked_count ?? raw.likes),
-    collected: metric(raw.collected_count), comments: metric(raw.comments_count), shared: metric(raw.shared_count ?? raw.share_count),
+    publishedAt: publishedTime(raw), likes: metric(raw.liked_count ?? raw.likes ?? interaction.like_count),
+    collected: metric(raw.collected_count ?? interaction.collect_count), comments: metric(raw.comments_count ?? interaction.comment_count),
+    shared: metric(raw.shared_count ?? raw.share_count ?? interaction.share_count),
     fans: metric(user.fans), sticky, sourceUrl: sourceLink(link, noteId), coverUrl: image,
     bodyComplete: source === 'detail' && typeof raw.desc === 'string'
       && raw.desc.length <= 12000 && typeof rawTitle === 'string' && rawTitle.length <= 2000 && raw.desc_truncated !== true
       && raw.has_more_desc !== true && raw.title_truncated !== true
       && !/(?:[.。]{3,}|…+)\s*$/.test(desc) && !/(?:[.。]{3,}|…+)\s*$/.test(title),
-    source, fetchedAt: new Date(fetchedAt).toISOString() };
+    source, fetchedAt: new Date(fetchedAt).toISOString(), ...(topics.length ? { topics } : {}), ...(media ? { media } : {}) };
 }
 function parseResponse(kind, payload, now, params = {}) {
   if (!payload || payload.code !== 200 || !payload.data || payload.data.success === false
@@ -70,15 +139,25 @@ function parseResponse(kind, payload, now, params = {}) {
   const wrapper = payload.data;
   const inner = wrapper.data;
   if (!inner || typeof inner !== 'object') throw error('PROVIDER_SCHEMA');
-  if (kind === 'user') return { fans: metric(inner.fans), fetchedAt: now };
+  if (kind === 'user') {
+    const visibility = inner.tab_public?.collection;
+    return { fans: metric(inner.fans), fetchedAt: now,
+      ...(typeof visibility === 'boolean' ? { collectionsPublic: visibility && inner.tab_visible?.collect !== false } : {}) };
+  }
+  if (kind === 'hot' || kind === 'inspiration') return { notes: [], signals: metadataSignals(kind, inner),
+    cursor: text(inner.cursor, 300), hasMore: inner.end_flag === false, fetchedAt: now };
   let rows;
   if (kind === 'search') rows = Array.isArray(inner.items) ? inner.items.filter(x => x?.note).map(x => x.note) : null;
-  else if (kind === 'author') rows = inner.notes ?? inner.items ?? inner.list;
+  else if (['author', 'faved', 'topic'].includes(kind)) {
+    if (kind === 'faved' && inner.fallback === true) throw error('PROVIDER_SCHEMA');
+    rows = inner.notes ?? inner.items ?? inner.list;
+  }
   else rows = Array.isArray(inner) ? inner : inner.notes ?? inner.items ?? [inner.note ?? inner.note_info ?? inner];
   if (!Array.isArray(rows)) throw error('PROVIDER_SCHEMA');
   if (kind === 'note_image' || kind === 'note_video') rows = rows.flatMap(row => Array.isArray(row?.note_list) ? row.note_list : [row]);
   const notes = rows.map(row => normalizeNote(row?.note_info || row?.note || row,
-    { source: kind === 'search' ? 'search' : kind === 'author' ? 'author' : 'detail', fetchedAt: now, authorId: params.user_id })).filter(Boolean);
+    { source: ['search', 'author', 'topic', 'faved'].includes(kind) ? kind : 'detail', fetchedAt: now,
+      authorId: kind === 'author' ? params.user_id : null })).filter(Boolean);
   // Empty responses are valid; a nonempty page that cannot be decoded is a schema failure.
   if (rows.length && !notes.length) throw error('PROVIDER_SCHEMA');
   return { notes, searchId: text(wrapper.search_id, 200), searchSessionId: text(wrapper.search_session_id, 200),
@@ -87,7 +166,8 @@ function parseResponse(kind, payload, now, params = {}) {
 }
 function validateParams(kind, params) {
   const allowed = { search: ['keyword', 'page', 'sort_type', 'time_filter', 'note_type', 'source', 'ai_mode', 'search_id', 'search_session_id'],
-    author: ['user_id', 'cursor'], user: ['user_id'], note_video: ['note_id'], note_image: ['note_id'] };
+    author: ['user_id', 'cursor'], user: ['user_id'], note_video: ['note_id'], note_image: ['note_id'],
+    hot: ['cursor'], inspiration: ['cursor', 'tab', 'source'], topic: ['page_id', 'sort'], faved: ['user_id', 'cursor'] };
   if (!ENDPOINTS[kind] || !params || typeof params !== 'object' || Array.isArray(params)
     || Object.keys(params).some(k => !allowed[kind].includes(k))) throw error('INVALID_PARAMETERS');
   if (kind === 'search') {
@@ -96,6 +176,12 @@ function validateParams(kind, params) {
       || !['popularity_descending', 'time_descending'].includes(params.sort_type)
       || !['一天内', '一周内'].includes(params.time_filter)
       || !['视频笔记', '普通笔记', '不限'].includes(params.note_type)) throw error('INVALID_PARAMETERS');
+  } else if (kind === 'hot' || kind === 'inspiration') {
+    if (params.cursor !== undefined && typeof params.cursor !== 'string') throw error('INVALID_PARAMETERS');
+    if (kind === 'inspiration' && ((params.tab !== undefined && params.tab !== 0)
+      || (params.source !== undefined && params.source !== 'creator_center'))) throw error('INVALID_PARAMETERS');
+  } else if (kind === 'topic') {
+    if (!ID.test(params.page_id || '') || !['trend', 'time'].includes(params.sort)) throw error('INVALID_PARAMETERS');
   } else if (!ID.test(params.user_id || params.note_id || '')) throw error('INVALID_PARAMETERS');
   if (Object.values(params).some(v => !['string', 'number'].includes(typeof v) || String(v).length > 500)) throw error('INVALID_PARAMETERS');
 }
@@ -134,28 +220,58 @@ class Provider {
   constructor({ store, lease, config, round, price, key, fetcher = fetch, clock = Date.now }) {
     Object.assign(this, { store, lease, config, round, price, key, fetcher, clock });
     this.sent = 0;
+    this.cacheHits = 0;
   }
-  async request(kind, params) {
+  async reusable(kind, requestKey, options) {
+    const version = 'discovery-provider-1';
+    const cached = await readCache(this.store, cacheKey('result', requestKey),
+      { now: this.clock(), maxAgeMs: 6 * 3600000, version });
+    if (!cached) return null;
+    if (!Array.isArray(cached.value.pages)) return null;
+    let notes;
+    try { notes = await this.notes(cached.value); } catch { return null; }
+    const candidate = options.expectedNote || notes.find(n => n.noteId === options.noteId) || cached.value;
+    if (this.clock() - cached.capturedAt > maximumAge(kind, candidate, this.clock())) return null;
+    if (kind.startsWith('note_') && options.expectedNote) {
+      const full = notes.find(n => n.noteId === options.expectedNote.noteId);
+      const merged = mergeDetail(full, options.expectedNote, this.clock());
+      if (!merged) return null;
+      notes = notes.map(n => n.noteId === merged.noteId ? merged : n);
+    }
+    // A long-lived week detail can contain a short-lived today candidate. Check each attached note separately.
+    if (kind.startsWith('note_')) notes = notes.map(note => note.noteId !== options.noteId
+      && this.clock() - cached.capturedAt > maximumAge(note.type === 'video' ? 'note_video' : 'note_image', note, this.clock())
+      ? { ...note, bodyComplete: false } : note);
+    this.cacheHits++;
+    return { ...cached.value, cached: true, capturedAt: cached.capturedAt, _notes: notes };
+  }
+  async request(kind, params, options = {}) {
     if (!this.config.enabled || !this.config.freeAiConfirmed || typeof this.key !== 'string' || !this.key.trim()) throw error('COLLECTION_DISABLED');
     validateParams(kind, params);
     if (JSON.stringify(params).includes(this.key)) throw error('INVALID_PARAMETERS');
     const requestKey = `${kind}:${digest(Object.fromEntries(Object.entries(params).sort()))}`;
+    const reuseEnabled = this.round.discoveryMode === 'adaptive';
+    if (reuseEnabled && !options.forceFresh) {
+      const reused = await this.reusable(kind, requestKey, { ...options, noteId: params.note_id });
+      if (reused) return reused;
+    }
     for (let attempt = 1; attempt <= 2; attempt++) {
       // The runner stops claiming work at 105 s, so ten serial requests (about 4 s each for searches) fit one tick.
       if (this.sent >= 10) throw error('TICK_LIMIT');
       const record = await reserveAttempt(this.store, { roundId: this.round.id, requestKey, kind, attempt,
         now: this.clock(), lease: this.lease, price: this.price, validation: this.round.validation,
-        limits: { ...this.config, roundCalls: this.round.roundCalls } });
+        purpose: options.purpose, sourceKey: options.sourceKey, limits: { ...this.config, roundCalls: this.round.roundCalls } });
       if (record.reused) {
         if (record.status === 'succeeded' && record.resultRef) {
           const result = await this.store.get('dfp_results', record.resultRef);
-          if (result) return result.value;
+          if (result) return { ...result.value, reused: true };
         }
         if (['reserved', 'inflight', 'unknown'].includes(record.status)) throw error('REQUEST_UNCERTAIN');
         if (!['HTTP_RETRYABLE', 'NETWORK_ERROR'].includes(record.errorCode)) throw error(record.errorCode || 'REQUEST_FAILED');
         continue;
       }
-      await markInflight(this.store, record.id, this.lease, this.clock());
+      const capturedAt = this.clock();
+      await markInflight(this.store, record.id, this.lease, capturedAt);
       this.sent++;
       // Persist only status numbers; response messages may contain private data.
       const diagnostics = { httpStatus: null, providerCode: null, providerDataCode: null };
@@ -171,7 +287,7 @@ class Provider {
         let payload; try { payload = JSON.parse(body); } catch { throw error('PROVIDER_SCHEMA'); }
         diagnostics.providerCode = payload?.code;
         diagnostics.providerDataCode = payload?.data?.code;
-        const parsed = parseResponse(kind, payload, this.clock(), params);
+        const parsed = parseResponse(kind, payload, capturedAt, params);
         // Store normalized pages in bounded chunks, never raw credentials or provider responses.
         const pages = [];
         if (parsed.notes) {
@@ -183,10 +299,21 @@ class Provider {
         }
         const value = { ...parsed }; delete value.notes;
         value.pages = pages;
+        if (reuseEnabled) value.capturedAt = capturedAt;
         await this.store.put('dfp_results', record.id, { value });
         await finishAttempt(this.store, record.id, this.lease, { status: 'succeeded', resultRef: record.id, ...diagnostics }, this.clock());
+        if (reuseEnabled) {
+          try {
+            await writeCache(this.store, this.lease, cacheKey('result', requestKey),
+              { capturedAt, ttlMs: 6 * 3600000, version: 'discovery-provider-1', value }, this.clock());
+          } catch (cacheError) {
+            if (cacheError.code === 'LEASE_EXPIRED') throw cacheError;
+            return { ...value, cacheWarning: 'CACHE_WRITE_FAILED' };
+          }
+        }
         return value;
       } catch (e) {
+        if (e.code === 'LEASE_EXPIRED') throw e;
         const code = ['PROVIDER_AUTH', 'HTTP_RETRYABLE', 'HTTP_REJECTED', 'PROVIDER_REJECTED', 'PROVIDER_SCHEMA', 'RESPONSE_TOO_LARGE'].includes(e.code) ? e.code : 'NETWORK_ERROR';
         await finishAttempt(this.store, record.id, this.lease, { status: code === 'NETWORK_ERROR' ? 'unknown' : 'failed', errorCode: code, ...diagnostics }, this.clock());
         if (code !== 'HTTP_RETRYABLE' || attempt === 2) throw error(code);
@@ -195,11 +322,16 @@ class Provider {
     throw error('REQUEST_FAILED');
   }
   async notes(result) {
+    if (Array.isArray(result._notes)) return result._notes;
     const rows = [];
-    for (const ref of result.pages || []) rows.push(...((await this.store.get('dfp_results', ref))?.notes || []));
+    for (const ref of result.pages || []) {
+      const page = await this.store.get('dfp_results', ref);
+      if (!Array.isArray(page?.notes)) throw error('PROVIDER_SCHEMA');
+      rows.push(...page.notes);
+    }
     return rows;
   }
 }
 
 module.exports = { normalizeNote, parseResponse, validateParams, metric, sourceLink, imageUrl, digest,
-  readLimited, verifyPrice, splitResultNotes, Provider, ID };
+  readLimited, verifyPrice, splitResultNotes, Provider, ID, mediaUrl, topicPage };

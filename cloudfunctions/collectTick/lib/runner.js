@@ -9,6 +9,8 @@ const { judgeNote } = require('./judge');
 const { publish, previouslyPublished, readSnapshot, storeCover } = require('./publisher');
 const KEYWORDS = require('../config/keywords.json');
 const RULES = require('../config/rules.json');
+const { Discovery, finalizeStatistics, sourceKey } = require('./discovery');
+const { cachedJudgment, cacheJudgment, reviewVideo } = require('./content-review');
 
 function searches(round) {
   if (round.kind === 'sweep') {
@@ -84,7 +86,11 @@ const REASONS = {
   AI_CALL_CAP: '本轮内容判断次数已达上限，保留已完成的选题。',
   SUPPLEMENT_BUDGET: '已为后续正式轮次保留额度，临时补跑结束。',
   SWEEP_UNAVAILABLE: '今天 06:00 的今日新锐没有更新成功，本轮只展示新找到的选题。',
-  CARRY_UNAVAILABLE: '今天 06:00 的今日新锐读取失败，本轮只展示新找到的选题。'
+  CARRY_UNAVAILABLE: '今天 06:00 的今日新锐读取失败，本轮只展示新找到的选题。',
+  CACHE_UNAVAILABLE: '部分复用数据不可用，已保留完成的检查结果。',
+  VISION_UNAVAILABLE: '视频画面复核暂不可用，部分视频尚未确认。',
+  VISION_BUDGET: '视频画面复核额度已用完，部分视频尚未确认。',
+  VIDEO_UNAVAILABLE: '部分视频画面无法读取，尚未确认其制作内容。'
 };
 function describeGaps(gaps) {
   return gaps.map(x => REASONS[x] || REASONS.REQUEST_FAILED).filter((v, i, a) => a.indexOf(v) === i).join(' ');
@@ -109,6 +115,7 @@ async function sameDaySweepPicks(store, round) {
 }
 async function conclude({ store, lease, round, progress, reason, clock }) {
   const rows = await candidateRows(store, round.id);
+  await finalizeStatistics({ store, lease, round, progress, rows, now: clock() });
   const notes = rows.filter(x => x.stage === 'done' && x.note.boards?.length).map(x => x.note);
   // Reaching the window end is not a coverage gap when every search and candidate had already finished.
   const workFinished = Array.isArray(progress.candidateIds) && (progress.candidateIndex || 0) >= progress.candidateIds.length;
@@ -119,9 +126,19 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
     processed: progress.candidateIndex || 0, gaps, notice: round.kind === 'sweep' ? KEYWORDS.dailySweep.coverageNotice : KEYWORDS.coverageNotice,
     ruleVersion: RULES.version, ...(round.supplement ? { supplement: true } : {}) };
   if (round.supplement) coverage.notice = `临时补跑。${coverage.notice}`;
+  if (progress.discovery) {
+    coverage.discovery = { successfulContent: progress.discovery.successfulContent, freshContent: progress.discovery.freshContent,
+      successfulMetadata: progress.discovery.successfulMetadata, cacheHits: progress.discovery.cacheHits,
+      relatedCandidates: progress.discovery.relatedCandidates, stopReason: progress.discovery.stopReason,
+      completedSources: progress.discovery.jobs.filter(j => j.status === 'complete').map(j => ({ type: j.origin, label: j.label })) };
+    coverage.keywords = progress.discovery.jobs.filter(j => j.kind === 'search' && j.status === 'complete').map(j => j.params.keyword);
+    coverage.notice = '从平台热点、话题、作者及关键词等入口按额度筛选，并非全站完整榜单。';
+    coverage.judgmentCacheHits = progress.judgmentCacheHits || 0;
+    coverage.vision = { checked: progress.visionChecked || 0, cacheHits: progress.visionCacheHits || 0 };
+  }
   // A rejected query does not erase completed searches. Total provider failure or an unavailable
   // classifier still retains the old snapshot; partial discovery can publish an honest zero result.
-  const serviceFailed = ['PROVIDER_AUTH', 'MODEL_UNAVAILABLE'].includes(reason);
+  const serviceFailed = ['PROVIDER_AUTH', 'MODEL_UNAVAILABLE', 'VISION_UNAVAILABLE'].includes(reason) || gaps.includes('VISION_UNAVAILABLE');
   if (!notes.length && (!progress.successfulSearches || serviceFailed)) {
     const status = finishStatus(reason);
     await store.transaction(async tx => {
@@ -146,7 +163,7 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
   return { roundId: round.id, status: result.status, snapshotId: result.id };
 }
 
-async function runTick({ store, config, key, generate, upload, clock = Date.now, verify = verifyPrice,
+async function runTick({ store, config, key, generate, upload, visionKey, review = reviewVideo, clock = Date.now, verify = verifyPrice,
   makeProvider = options => new Provider(options) }) {
   if (!config.enabled) return { status: 'disabled' };
   if (!config.freeAiConfirmed) throw error('FREE_AI_NOT_CONFIRMED');
@@ -168,6 +185,8 @@ async function runTick({ store, config, key, generate, upload, clock = Date.now,
     if (!round) return { status: 'outside_window' };
     const stored = await store.get('dfp_rounds', round.id);
     if (stored && stored.status !== 'running') return { roundId: round.id, status: stored.status, snapshotId: stored.snapshotId || null };
+    // Resume with the accepted round definition; changing configuration must not reshape work already in progress.
+    if (stored?.definition) round = stored.definition;
     progress = stored?.progress || { searchIndex: 0, successfulSearches: 0, candidateIds: null, candidateIndex: 0, aiCalls: 0, gaps: [] };
     if (!stored) await store.transaction(async tx => {
       await assertLease(tx, lease, clock());
@@ -182,8 +201,18 @@ async function runTick({ store, config, key, generate, upload, clock = Date.now,
     validatePrice(price, clock());
     const provider = makeProvider({ store, lease, config, round, price, key, clock });
     const queries = searches(round);
+    const adaptive = round.discoveryMode === 'adaptive';
+    const discovery = adaptive ? new Discovery({ store, lease, round, progress, clock }) : null;
+    if (discovery) { await discovery.init(); await saveProgress(store, lease, round.id, progress, clock); }
     while (clock() < deadline - 45000 && clock() < round.closesAt - 10000) {
-      if (progress.searchIndex < queries.length) {
+      if (discovery && !progress.discovery.done) {
+        await discovery.step(provider);
+        // Metadata can discover directions but cannot establish a successful scan of actual posts.
+        progress.successfulSearches = progress.discovery.freshContent;
+        await saveProgress(store, lease, round.id, progress, clock);
+        continue;
+      }
+      if (!adaptive && progress.searchIndex < queries.length) {
         try {
           const result = await provider.request('search', queries[progress.searchIndex]);
           for (const note of await provider.notes(result)) {
@@ -213,28 +242,72 @@ async function runTick({ store, config, key, generate, upload, clock = Date.now,
       const docId = `${round.id}_${noteId}`;
       const row = await store.get('dfp_candidates', docId);
       if (!row) throw error('MISSING_CANDIDATE');
-      const save = () => store.put('dfp_candidates', docId, row);
+      const save = () => store.transaction(async tx => {
+        await assertLease(tx, lease, clock()); await tx.put('dfp_candidates', docId, row);
+      });
       try {
         if (row.stage === 'detail') {
-          const result = await provider.request(row.note.type === 'video' ? 'note_video' : 'note_image', { note_id: noteId });
-          const full = (await provider.notes(result)).find(x => x.noteId === noteId);
+          const result = await provider.request(row.note.type === 'video' ? 'note_video' : 'note_image', { note_id: noteId },
+            { expectedNote: row.note, purpose: 'inspection', ...(row.origins?.[0]?.key ? { sourceKey: row.origins[0].key } : {}) });
+          const returned = await provider.notes(result);
+          const full = returned.find(x => x.noteId === noteId);
           if (!full || full.authorId !== row.note.authorId) throw error('DETAIL_MISMATCH');
+          if (discovery) {
+            await discovery.addNotes(returned.filter(x => x.noteId !== noteId),
+              { key: sourceKey('related', { note_id: noteId }), type: 'related', label: '详情附带作品' }, true);
+            await saveProgress(store, lease, round.id, progress, clock);
+          }
           row.note = { ...row.note, ...full, fans: full.fans ?? row.note.fans };
           // The sweep only publishes today picks: a detail that moves a note out of the today window ends its inspection.
-          if (round.kind === 'sweep' && !eligibleBoards(row.note, round.scheduledAt).includes('today')) {
-            row.stage = 'skipped'; row.skipReason = 'outside_today_after_detail';
+          if (!admitsCandidate(round, row.note)) {
+            row.stage = 'skipped'; row.skipReason = 'outside_metrics_after_detail'; row.outcome = 'rejected_metrics';
           } else row.stage = 'judge';
           await save();
         } else if (row.stage === 'judge') {
-          if (progress.aiCalls >= config.maxAiCallsPerRound) throw error('AI_CALL_CAP');
-          row.stage = 'judging'; await save();
-          progress.aiCalls++; await saveProgress(store, lease, round.id, progress, clock);
-          row.note.judgment = await judgeNote(row.note, generate);
+          const cached = adaptive ? await cachedJudgment(store, row.note, 'text', clock(), warning => progress.gaps.push(warning)) : null;
+          if (cached) { row.note.judgment = cached; progress.judgmentCacheHits = (progress.judgmentCacheHits || 0) + 1; }
+          else {
+            if (progress.aiCalls >= config.maxAiCallsPerRound) throw error('AI_CALL_CAP');
+            row.stage = 'judging'; await save();
+            progress.aiCalls++; await saveProgress(store, lease, round.id, progress, clock);
+            row.note.judgment = await judgeNote(row.note, generate);
+            if (adaptive) {
+              const warning = await cacheJudgment(store, lease, row.note, 'text', row.note.judgment, clock());
+              if (warning) progress.gaps.push(warning);
+            }
+          }
           if (row.note.judgment.verdict === 'error') throw error('MODEL_UNAVAILABLE');
-          row.stage = row.note.judgment.verdict === 'cooking' ? 'history' : 'skipped'; await save();
+          row.note.textJudgment = row.note.judgment;
+          const visual = adaptive && round.visionEnabled && config.vision?.enabled && row.note.type === 'video'
+            && row.note.judgment.verdict === 'uncertain' && admitsCandidate(round, row.note);
+          row.stage = row.note.judgment.verdict === 'cooking' ? 'history' : visual ? 'visual' : 'skipped';
+          if (row.stage === 'skipped') row.outcome = row.note.judgment.verdict === 'not_cooking' ? 'rejected_content' : 'incomplete';
+          if (discovery && row.stage === 'history') await discovery.rememberCooking(row.note);
+          await save(); await saveProgress(store, lease, round.id, progress, clock);
+        } else if (row.stage === 'visual') {
+          // Download, decode and model each have their own deadlines; start only with room for the full chain.
+          if (clock() >= Math.min(deadline, round.closesAt) - 100000) break;
+          if (!config.vision?.enabled) { row.stage = 'skipped'; row.outcome = 'incomplete'; await save(); continue; }
+          try {
+            const result = await review({ store, lease, round, note: row.note, settings: config.vision, key: visionKey, clock });
+            if (result.cacheWarning) progress.gaps.push(result.cacheWarning);
+            if (result.verdict === 'error') throw error(result.reason || 'VISION_UNAVAILABLE');
+            if (result.cached) progress.visionCacheHits = (progress.visionCacheHits || 0) + 1;
+            else progress.visionChecked = (progress.visionChecked || 0) + 1;
+            row.note.judgment = result;
+            row.stage = result.verdict === 'cooking' ? 'history' : 'skipped';
+            row.outcome = result.verdict === 'not_cooking' ? 'rejected_content' : 'incomplete';
+            if (discovery && row.stage === 'history') await discovery.rememberCooking(row.note);
+          } catch (e) {
+            if (e.code === 'LEASE_EXPIRED') throw e;
+            const gap = /VISION_.*BUDGET/.test(e.code) ? 'VISION_BUDGET' : /^VIDEO_/.test(e.code) ? 'VIDEO_UNAVAILABLE' : 'VISION_UNAVAILABLE';
+            progress.gaps.push(gap); row.stage = 'skipped'; row.outcome = 'incomplete'; row.errorCode = gap;
+          }
+          await save(); await saveProgress(store, lease, round.id, progress, clock);
         } else if (row.stage === 'judging') {
           // A crashed model call is never silently replayed.
           row.stage = 'skipped'; row.note.judgment = { verdict: 'uncertain', evidence: '', reason: 'interrupted_model' };
+          row.outcome = 'incomplete';
           progress.gaps.push('REQUEST_FAILED'); await save();
         } else if (row.stage === 'history') {
           if (eligibleBoards(row.note, round.scheduledAt).includes('today')) {
@@ -242,7 +315,7 @@ async function runTick({ store, config, key, generate, upload, clock = Date.now,
             let history = await store.get('dfp_results', cacheId);
             if (!history || (historyBaseline(row.note, history.notes).baselineReason === 'fewer_than_seven' && history.hasMore && history.cursor && history.pages < 2)) {
               const params = { user_id: row.note.authorId, ...(history?.cursor ? { cursor: history.cursor } : {}) };
-              const result = await provider.request('author', params);
+              const result = await provider.request('author', params, { purpose: 'inspection' });
               const works = (await provider.notes(result)).map(x => ({ noteId: x.noteId, authorId: x.authorId, publishedAt: x.publishedAt, likes: x.likes, sticky: x.sticky }));
               history = { notes: [...(history?.notes || []), ...works], hasMore: result.hasMore, cursor: result.cursor, pages: (history?.pages || 0) + 1 };
               await store.put('dfp_results', cacheId, history);
@@ -254,7 +327,7 @@ async function runTick({ store, config, key, generate, upload, clock = Date.now,
         } else if (row.stage === 'fans') {
           const primaryBoard = eligibleBoards(row.note, round.scheduledAt).some(board => board === 'today' || board === 'week');
           if (!primaryBoard && inWindow(row.note, round.scheduledAt, 5) && row.note.fans === null) {
-            const result = await provider.request('user', { user_id: row.note.authorId });
+            const result = await provider.request('user', { user_id: row.note.authorId }, { purpose: 'inspection' });
             row.note.fans = result.fans;
           }
           row.note.boards = eligibleBoards(row.note, round.scheduledAt);
@@ -263,13 +336,14 @@ async function runTick({ store, config, key, generate, upload, clock = Date.now,
           row.stage = 'cover'; await save();
         } else if (row.stage === 'cover') {
           row.note.fileId = upload ? await storeCover({ store, upload, note: row.note }) : null;
-          row.stage = row.note.boards.length ? 'done' : 'skipped'; await save();
+          row.stage = row.note.boards.length ? 'done' : 'skipped';
+          row.outcome = row.note.boards.length ? 'accepted' : 'rejected_metrics'; await save();
         } else if (['done', 'skipped'].includes(row.stage)) {
           progress.candidateIndex++; await saveProgress(store, lease, round.id, progress, clock);
         } else throw error('INVALID_STAGE');
       } catch (e) {
         if (['TICK_LIMIT', 'DAILY_BUDGET', 'ROUND_BUDGET', 'VALIDATION_BUDGET', 'SUPPLEMENT_BUDGET', 'PROVIDER_AUTH', 'LEASE_EXPIRED', 'MODEL_UNAVAILABLE', 'AI_CALL_CAP'].includes(e.code)) throw e;
-        row.stage = 'skipped'; row.errorCode = 'REQUEST_FAILED'; await save();
+        row.stage = 'skipped'; row.errorCode = 'REQUEST_FAILED'; row.outcome = 'incomplete'; await save();
         progress.gaps.push('REQUEST_FAILED');
         progress.candidateIndex++; await saveProgress(store, lease, round.id, progress, clock);
       }

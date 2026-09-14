@@ -67,6 +67,13 @@ function loadConfig(env = process.env) {
     maxAiCallsPerRound: 20, maxAiOutputTokens: 1024, maxAiInputChars: 12000,
     captureCallerForSetup: env.DFP_CAPTURE_CALLER_FOR_SETUP === 'true'
   };
+  config.discoveryMode = env.DFP_DISCOVERY_MODE || 'legacy';
+  if (!['legacy', 'adaptive'].includes(config.discoveryMode)) throw error('INVALID_DISCOVERY_CONFIG');
+  config.vision = { enabled: env.DFP_VISION_ENABLED === 'true',
+    dailyMicroCny: number(env.DFP_VISION_DAILY_MICRO_CNY, 500000),
+    roundCalls: number(env.DFP_VISION_ROUND_CALLS, 3), validationCalls: 6, validationMicroCny: 200000 };
+  if (config.vision.enabled && (config.discoveryMode !== 'adaptive' || !config.vision.dailyMicroCny
+    || !config.vision.roundCalls || typeof env.DFP_VISION_KEY !== 'string' || env.DFP_VISION_KEY.length < 20)) throw error('INVALID_VISION_CONFIG');
   if (config.aiProvider !== 'hunyuan-v3' || config.aiModel !== 'hy3') throw error('FREE_AI_ONLY');
   if (!/^wx[0-9a-f]{16}$/.test(config.appId)) throw error('INVALID_APP_ID');
   if (config.enabled && (!config.dailyCalls || !config.dailyMicroUsd || !config.validationCalls || !config.validationMicroUsd || !config.freeAiConfirmed)) throw error('CONFIGURATION_INCOMPLETE');
@@ -128,7 +135,9 @@ function scheduledRound(now, config) {
     : kind === 'sweep' ? config.sweepCalls : (hour === 20 ? regularDailyCalls - 2 * allocation : allocation);
   const reservedRegularCalls = supplement ? REGULAR_HOURS.filter(h => h > hour).reduce((sum, h) => sum + allocationFor(h), 0) : 0;
   return { id, day: shanghaiDay(start), scheduledAt: start, closesAt: start + windowMinutes * 60000, validation, kind,
-    sweepEnabled: Boolean(config.sweepCalls), roundCalls, ...(supplement ? { supplement: true, reservedRegularCalls } : {}) };
+    sweepEnabled: Boolean(config.sweepCalls), roundCalls, ...(supplement ? { supplement: true, reservedRegularCalls } : {}),
+    ...(config.discoveryMode === 'adaptive' ? { discoveryMode: 'adaptive', discoveryLimit: kind === 'sweep' ? 18 : 4,
+      visionEnabled: config.vision?.enabled === true, ...(config.vision?.enabled ? { visionRoundCalls: config.vision.roundCalls } : {}) } : {}) };
 }
 
 module.exports = { loadConfig, assertTimer, scheduledRound, sweepWindow, error };

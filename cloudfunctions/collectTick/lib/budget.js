@@ -58,11 +58,15 @@ function attemptId(roundId, requestKey, attempt) {
 
 async function reserveAttempt(store, request) {
   const { roundId, requestKey, kind, attempt, now, lease, limits, price, validation = false } = request;
+  const isDiscoveryKind = ['search', 'hot', 'inspiration', 'topic', 'faved'].includes(kind);
+  const purpose = request.purpose || (isDiscoveryKind ? 'discovery' : 'inspection');
   validateLimits(limits);
   validatePrice(price, now);
   if (!/^\d{8}-\d{4}$/.test(roundId || '') || typeof requestKey !== 'string' || !requestKey
-    || requestKey.length > 300 || !['search', 'author', 'user', 'note_image', 'note_video'].includes(kind)
-    || !integer(attempt, 1, 2)) fail('INVALID_REQUEST');
+    || requestKey.length > 300 || !['search', 'author', 'user', 'note_image', 'note_video', 'hot', 'inspiration', 'topic', 'faved'].includes(kind)
+    || !integer(attempt, 1, 2) || !['discovery', 'inspection'].includes(purpose)
+    || (isDiscoveryKind && purpose !== 'discovery')
+    || (request.sourceKey !== undefined && !/^source_[a-f0-9]{48}$/.test(request.sourceKey))) fail('INVALID_REQUEST');
   const day = shanghaiDay(now);
   const id = attemptId(roundId, requestKey, attempt);
   return store.transaction(async tx => {
@@ -74,6 +78,13 @@ async function reserveAttempt(store, request) {
     }
     const round = await tx.get('dfp_rounds', roundId);
     if (!round || round.status !== 'running') fail('ROUND_NOT_RUNNING');
+    const adaptive = round.definition?.discoveryMode === 'adaptive';
+    const discoveryCalls = round.discoveryCalls || 0;
+    if (adaptive) {
+      const ceiling = round.definition.kind === 'sweep' ? 18 : 4;
+      if (!integer(round.definition.discoveryLimit, 1, ceiling) || !integer(discoveryCalls, 0, ceiling)) fail('INVALID_BUDGET');
+      if (purpose === 'discovery' && discoveryCalls + 1 > round.definition.discoveryLimit) fail('DISCOVERY_BUDGET');
+    }
     const daily = await tx.get('dfp_budgets', day) || { calls: 0, microUsd: 0 };
     const trial = validation ? (await tx.get('dfp_budgets', 'initial-validation') || { calls: 0, microUsd: 0 }) : null;
     if (daily.calls + 1 > limits.dailyCalls || daily.microUsd + price.microUsd > limits.dailyMicroUsd) fail('DAILY_BUDGET');
@@ -88,12 +99,14 @@ async function reserveAttempt(store, request) {
     if ((round.calls || 0) + 1 > Math.min(limits.roundCalls, roundCeiling)) fail('ROUND_BUDGET');
     if (trial && (trial.calls + 1 > limits.validationCalls || trial.microUsd + price.microUsd > limits.validationMicroUsd)) fail('VALIDATION_BUDGET');
     const record = {
-      roundId, requestKey, kind, attempt, day, validation, owner: lease.owner, leaseEpoch: lease.epoch,
-      status: 'reserved', microUsd: price.microUsd, reservedAt: now, finishedAt: null
+      roundId, requestKey, kind, purpose, attempt, day, validation, owner: lease.owner, leaseEpoch: lease.epoch,
+      status: 'reserved', microUsd: price.microUsd, reservedAt: now, finishedAt: null,
+      ...(request.sourceKey ? { sourceKey: request.sourceKey } : {})
     };
     await tx.put('dfp_budgets', day, { ...daily, calls: daily.calls + 1, microUsd: daily.microUsd + price.microUsd });
     if (trial) await tx.put('dfp_budgets', 'initial-validation', { ...trial, calls: trial.calls + 1, microUsd: trial.microUsd + price.microUsd });
-    await tx.put('dfp_rounds', roundId, { ...round, calls: (round.calls || 0) + 1, microUsd: (round.microUsd || 0) + price.microUsd });
+    await tx.put('dfp_rounds', roundId, { ...round, calls: (round.calls || 0) + 1, microUsd: (round.microUsd || 0) + price.microUsd,
+      ...(adaptive ? { discoveryCalls: discoveryCalls + (purpose === 'discovery' ? 1 : 0) } : {}) });
     await tx.create('dfp_attempts', id, record);
     return { ...record, id, reused: false };
   });

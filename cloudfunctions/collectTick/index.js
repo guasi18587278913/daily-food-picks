@@ -15,7 +15,7 @@ exports.main = async (event, runtimeContext) => {
     if (!config.enabled) return { status: 'disabled' };
     const app = cloudbase.init({ env: config.envId });
     return await runTick({ config, store: new CloudStore(app.database()), key: process.env.DFP_TIKHUB_KEY,
-      generate: freeModelGenerator(app), upload: options => wx.uploadFile(options) });
+      generate: freeModelGenerator(app), upload: options => wx.uploadFile(options), visionKey: process.env.DFP_VISION_KEY });
   } catch (e) {
     const code = ['UNAUTHORIZED_TRIGGER', 'CONFIGURATION_INCOMPLETE', 'FREE_AI_ONLY', 'INVALID_VALIDATION_TIME',
       'INVALID_SUPPLEMENT_CONFIG', 'INVALID_SUPPLEMENT_TIME', 'LEASE_EXPIRED', 'UNVERIFIED_PRICE'].includes(e.code) ? e.code : 'COLLECTOR_UNAVAILABLE';
