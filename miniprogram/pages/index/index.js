@@ -7,7 +7,7 @@ const STORAGE_KEY = 'food-picks:favorites:v1';
 Page({
   data: {
     mode: 'round', query: '', loading: true, loadingMore: false, locked: false, message: '',
-    statusLabel: '正在查看更新', roundLabel: '每日三次，给创作找点新意', updatedLabel: '',
+    statusLabel: '正在查看更新', statusTone: '', roundLabel: '每日三次，给创作找点新意', updatedLabel: '',
     partialReason: '', coverageNotice: '基于当轮关键词发现选题，未覆盖小红书全部内容。',
     newAvailable: false, total: 0, favoriteCount: 0, nextCursor: /** @type {string|null} */ (null),
     rounds: /** @type {RoundItem[]} */ ([]), roundIndex: 0, olderRounds: false,
@@ -64,7 +64,8 @@ Page({
       const status = await this._api('status');
       if (statusRequest !== this._statusRequestId) return;
       const labels = /** @type {Record<string,string>} */ ({ pending: '等待首次更新', running: '新选题整理中', complete: '已更新', partial: '本轮部分更新', failed: '本轮更新未完成', budget_exhausted: '本轮已到调用上限' });
-      this.setData({ locked: false, statusLabel: labels[status.status] || '等待更新', message: status.partialReason || '' });
+      const tones = /** @type {Record<string,string>} */ ({ complete: 'ok', partial: 'warn', budget_exhausted: 'warn', failed: 'error' });
+      this.setData({ locked: false, statusLabel: labels[status.status] || '等待更新', statusTone: tones[status.status] || '', message: status.partialReason || '' });
       this._newestId = status.snapshotId;
       if (!status.snapshotId) { this.setData({ loading: false }); return; }
       const changed = status.snapshotId !== this._latestId;
@@ -195,7 +196,7 @@ Page({
     const note = this._notes.find(x => x.noteId === event.currentTarget.dataset.id);
     try {
       await copySource(note?.sourceUrl || null, options => wx.setClipboardData(options));
-      wx.showModal({ title: '原文链接已复制', content: '可以粘贴到浏览器查看原文。小红书可能要求登录，内容也可能已被作者删除。', showCancel: false, confirmText: '知道了', confirmColor: '#a74431' });
+      wx.showModal({ title: '原文链接已复制', content: '可以粘贴到浏览器查看原文。小红书可能要求登录，内容也可能已被作者删除。', showCancel: false, confirmText: '知道了', confirmColor: '#B8441A' });
     } catch (e) { wx.showToast({ title: /** @type {Error} */ (e).message, icon: 'none' }); }
   },
   /** @param {{currentTarget:{dataset:Record<string,string>}}} event */
