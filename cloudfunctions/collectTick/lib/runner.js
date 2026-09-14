@@ -4,6 +4,7 @@ const { randomUUID } = require('node:crypto');
 const { claimLease, releaseLease, assertLease, validatePrice } = require('./budget');
 const { scheduledRound, sweepWindow, error } = require('./config');
 const { Provider, verifyPrice } = require('./provider');
+const { detailKind } = require('./endpoints');
 const { eligibleBoards, historyBaseline, inWindow } = require('./ranking');
 const { judgeNote, needsTextModel } = require('./judge');
 const { publish, previouslyPublished, readSnapshot, storeCover } = require('./publisher');
@@ -253,7 +254,7 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
       });
       try {
         if (row.stage === 'detail') {
-          const result = await provider.request(row.note.type === 'video' ? 'note_video' : 'note_image', { note_id: noteId },
+          const result = await provider.request(detailKind(row.note.type), { note_id: noteId },
             { expectedNote: row.note, purpose: 'inspection', ...(row.origins?.[0]?.key ? { sourceKey: row.origins[0].key } : {}) });
           const returned = await provider.notes(result);
           const full = returned.find(x => x.noteId === noteId);

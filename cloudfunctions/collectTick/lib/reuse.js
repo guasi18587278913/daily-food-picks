@@ -1,6 +1,7 @@
 'use strict';
 const { createHash } = require('node:crypto');
 const { assertLease } = require('./budget');
+const { endpoint } = require('./endpoints');
 const HOUR = 3600000;
 function cacheKey(kind, parts) {
   return `${kind === 'judgment' ? 'judgment' : 'reuse'}_${createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 48)}`;
@@ -26,9 +27,11 @@ async function writeCache(store, lease, key, { capturedAt, ttlMs, version, value
   });
 }
 function maximumAge(kind, note, now) {
-  if (kind === 'user' && !Number.isSafeInteger(note?.fans)) return HOUR;
-  if (kind === 'user' && Number.isSafeInteger(note?.fans) && note.fans >= 4000 && note.fans <= 6000) return HOUR;
-  if (kind.startsWith('note_')) {
+  const spec = endpoint(kind);
+  const profile = spec?.yields === 'profile';
+  if (profile && !Number.isSafeInteger(note?.fans)) return HOUR;
+  if (profile && Number.isSafeInteger(note?.fans) && note.fans >= 4000 && note.fans <= 6000) return HOUR;
+  if (spec?.detail) {
     const at = Date.parse(note?.publishedAt);
     if (Number.isFinite(at) && at >= now - 86400000) return HOUR;
     if ([300, 1000, 10000].some(t => Number.isFinite(note?.likes) && note.likes >= t * 0.8 && note.likes <= t * 1.2)) return HOUR;

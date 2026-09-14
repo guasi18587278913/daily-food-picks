@@ -4,12 +4,8 @@ const { createHash } = require('node:crypto');
 const { PRICE_URL, PRICE_MICRO_USD, reserveAttempt, markInflight, finishAttempt } = require('./budget');
 const { error } = require('./config');
 const { cacheKey, readCache, writeCache, maximumAge, mergeDetail } = require('./reuse');
+const { ID, endpoint, detailKind } = require('./endpoints');
 const BASE = 'https://api.tikhub.io/api/v1/xiaohongshu/app_v2/';
-const ENDPOINTS = Object.freeze({ search: 'search_notes', author: 'get_user_posted_notes',
-  user: 'get_user_info', note_video: 'get_video_note_detail', note_image: 'get_image_note_detail',
-  hot: 'get_creator_hot_inspiration_feed', inspiration: 'get_creator_inspiration_feed',
-  topic: 'get_topic_feed', faved: 'get_user_faved_notes' });
-const ID = /^[0-9a-f]{24}$/;
 const metric = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
 const text = (value, max) => typeof value === 'string' ? value.slice(0, max) : '';
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -83,12 +79,12 @@ function mediaOf(raw) {
     ? media.video.md5.toLowerCase() : new URL(chosen.url).pathname;
   return { ...chosen, durationMs, identity: digest(contentId) };
 }
-function metadataSignals(kind, inner) {
-  const rows = kind === 'hot' ? inner.items : inner.inspirations;
+function metadataSignals(spec, inner) {
+  const rows = spec.signalRows(inner);
   if (!Array.isArray(rows)) throw error('PROVIDER_SCHEMA');
   const signals = rows.slice(0, 60).map(row => {
     let pageId = ID.test(row?.page_id || '') ? row.page_id : null;
-    if (!pageId && kind === 'inspiration') {
+    if (!pageId && spec.topicFromDeeplink) {
       try {
         const link = new URL(row?.post_deeplink);
         if (link.protocol === 'xhsdiscover:') {
@@ -140,30 +136,24 @@ function normalizeNote(raw, { source = 'search', fetchedAt = Date.now(), authorI
     source, fetchedAt: new Date(fetchedAt).toISOString(), ...(topics.length ? { topics } : {}), ...(media ? { media } : {}) };
 }
 function parseResponse(kind, payload, now, params = {}) {
+  const spec = endpoint(kind);
+  if (!spec) throw error('INVALID_PARAMETERS');
   if (!payload || payload.code !== 200 || !payload.data || payload.data.success === false
     || ![undefined, 0, 200].includes(payload.data.code)) throw error('PROVIDER_REJECTED');
   const wrapper = payload.data;
   const inner = wrapper.data;
   if (!inner || typeof inner !== 'object') throw error('PROVIDER_SCHEMA');
-  if (kind === 'user') {
+  if (spec.yields === 'profile') {
     const visibility = inner.tab_public?.collection;
     return { fans: metric(inner.fans), fetchedAt: now,
       ...(typeof visibility === 'boolean' ? { collectionsPublic: visibility && inner.tab_visible?.collect !== false } : {}) };
   }
-  if (kind === 'hot' || kind === 'inspiration') return { notes: [], signals: metadataSignals(kind, inner),
+  if (spec.yields === 'signals') return { notes: [], signals: metadataSignals(spec, inner),
     cursor: text(inner.cursor, 300), hasMore: inner.end_flag === false, fetchedAt: now };
-  let rows;
-  if (kind === 'search') rows = Array.isArray(inner.items) ? inner.items.filter(x => x?.note).map(x => x.note) : null;
-  else if (['author', 'faved', 'topic'].includes(kind)) {
-    if (kind === 'faved' && inner.fallback === true) throw error('PROVIDER_SCHEMA');
-    rows = inner.notes ?? inner.items ?? inner.list;
-  }
-  else rows = Array.isArray(inner) ? inner : inner.notes ?? inner.items ?? [inner.note ?? inner.note_info ?? inner];
+  const rows = spec.rows(inner);
   if (!Array.isArray(rows)) throw error('PROVIDER_SCHEMA');
-  if (kind === 'note_image' || kind === 'note_video') rows = rows.flatMap(row => Array.isArray(row?.note_list) ? row.note_list : [row]);
   const notes = rows.map(row => normalizeNote(row?.note_info || row?.note || row,
-    { source: ['search', 'author', 'topic', 'faved'].includes(kind) ? kind : 'detail', fetchedAt: now,
-      authorId: kind === 'author' ? params.user_id : null })).filter(Boolean);
+    { source: spec.source, fetchedAt: now, authorId: spec.authorFromParams ? params.user_id : null })).filter(Boolean);
   // Empty responses are valid; a nonempty page that cannot be decoded is a schema failure.
   if (rows.length && !notes.length) throw error('PROVIDER_SCHEMA');
   return { notes, searchId: text(wrapper.search_id, 200), searchSessionId: text(wrapper.search_session_id, 200),
@@ -171,24 +161,9 @@ function parseResponse(kind, payload, now, params = {}) {
     hasMore: inner.has_more === true, cursor: text(inner.cursor || rows.at(-1)?.cursor, 300), fetchedAt: now };
 }
 function validateParams(kind, params) {
-  const allowed = { search: ['keyword', 'page', 'sort_type', 'time_filter', 'note_type', 'source', 'ai_mode', 'search_id', 'search_session_id'],
-    author: ['user_id', 'cursor'], user: ['user_id'], note_video: ['note_id'], note_image: ['note_id'],
-    hot: ['cursor'], inspiration: ['cursor', 'tab', 'source'], topic: ['page_id', 'sort'], faved: ['user_id', 'cursor'] };
-  if (!ENDPOINTS[kind] || !params || typeof params !== 'object' || Array.isArray(params)
-    || Object.keys(params).some(k => !allowed[kind].includes(k))) throw error('INVALID_PARAMETERS');
-  if (kind === 'search') {
-    if (typeof params.keyword !== 'string' || !params.keyword.trim() || params.keyword.length > 60
-      || !Number.isInteger(params.page) || params.page < 1 || params.page > 20
-      || !['popularity_descending', 'time_descending'].includes(params.sort_type)
-      || !['一天内', '一周内'].includes(params.time_filter)
-      || !['视频笔记', '普通笔记', '不限'].includes(params.note_type)) throw error('INVALID_PARAMETERS');
-  } else if (kind === 'hot' || kind === 'inspiration') {
-    if (params.cursor !== undefined && typeof params.cursor !== 'string') throw error('INVALID_PARAMETERS');
-    if (kind === 'inspiration' && ((params.tab !== undefined && params.tab !== 0)
-      || (params.source !== undefined && params.source !== 'creator_center'))) throw error('INVALID_PARAMETERS');
-  } else if (kind === 'topic') {
-    if (!ID.test(params.page_id || '') || !['trend', 'time'].includes(params.sort)) throw error('INVALID_PARAMETERS');
-  } else if (!ID.test(params.user_id || params.note_id || '')) throw error('INVALID_PARAMETERS');
+  const spec = endpoint(kind);
+  if (!spec || !params || typeof params !== 'object' || Array.isArray(params)
+    || Object.keys(params).some(k => !spec.params.includes(k)) || !spec.accepts(params)) throw error('INVALID_PARAMETERS');
   if (Object.values(params).some(v => !['string', 'number'].includes(typeof v) || String(v).length > 500)) throw error('INVALID_PARAMETERS');
 }
 async function readLimited(response, max = 6 * 1024 * 1024) {
@@ -238,15 +213,16 @@ class Provider {
     try { notes = await this.notes(cached.value); } catch { return null; }
     const candidate = options.expectedNote || notes.find(n => n.noteId === options.noteId) || cached.value;
     if (this.clock() - cached.capturedAt > maximumAge(kind, candidate, this.clock())) return null;
-    if (kind.startsWith('note_') && options.expectedNote) {
+    const detail = endpoint(kind)?.detail === true;
+    if (detail && options.expectedNote) {
       const full = notes.find(n => n.noteId === options.expectedNote.noteId);
       const merged = mergeDetail(full, options.expectedNote, this.clock());
       if (!merged) return null;
       notes = notes.map(n => n.noteId === merged.noteId ? merged : n);
     }
     // A long-lived week detail can contain a short-lived today candidate. Check each attached note separately.
-    if (kind.startsWith('note_')) notes = notes.map(note => note.noteId !== options.noteId
-      && this.clock() - cached.capturedAt > maximumAge(note.type === 'video' ? 'note_video' : 'note_image', note, this.clock())
+    if (detail) notes = notes.map(note => note.noteId !== options.noteId
+      && this.clock() - cached.capturedAt > maximumAge(detailKind(note.type), note, this.clock())
       ? { ...note, bodyComplete: false } : note);
     this.cacheHits++;
     return { ...cached.value, cached: true, capturedAt: cached.capturedAt, _notes: notes };
@@ -282,7 +258,7 @@ class Provider {
       // Persist only status numbers; response messages may contain private data.
       const diagnostics = { httpStatus: null, providerCode: null, providerDataCode: null };
       try {
-        const url = new URL(ENDPOINTS[kind], BASE);
+        const url = new URL(endpoint(kind).path, BASE);
         Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
         const response = await this.fetcher(url, { headers: { Authorization: `Bearer ${this.key}` },
           signal: AbortSignal.timeout(40000), redirect: 'error' });

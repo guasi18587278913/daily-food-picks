@@ -1,11 +1,13 @@
 'use strict';
 const { digest, validateParams } = require('./provider');
+const { endpoint } = require('./endpoints');
 const { eligibleBoards } = require('./ranking');
 const { previouslyPublished } = require('./publisher');
 const { assertLease } = require('./budget');
 const POLICY = require('../config/discovery.json');
 const KEYWORDS = require('../config/keywords.json');
-const CONTENT_KINDS = new Set(['search', 'topic', 'author', 'faved']);
+// Content jobs return posts for the candidate pool; the rest return leads (signals) or an author profile.
+const yieldsNotes = kind => endpoint(kind)?.yields === 'notes';
 const sourceKey = (kind, params) => `source_${digest([kind, Object.fromEntries(Object.entries(params).sort())]).slice(0, 48)}`;
 const foodHint = text => POLICY.foodHints.some(h => String(text || '').toLowerCase().includes(h.toLowerCase()));
 function admitsCandidate(round, note) {
@@ -70,6 +72,7 @@ class Discovery {
       words[(rotation + Math.floor(i / 2)) % words.length], 'keyword', this.clock()));
     const ranked = rankSources([...this.sources.values()], stats, this.clock(), explore).slice(0, 12);
     // A real post query comes before metadata, whose retries could otherwise consume the entire discovery budget.
+    // Deliberately narrower than yieldsNotes: faved must pass a publicity check before it can be issued.
     const firstContent = !explore && ranked.find(s => ['search', 'topic', 'author'].includes(s.kind)) || fixed[0];
     const seeds = [firstContent, meta, ...ranked, ...fixed];
     this.progress.discovery = { jobs: [], index: 0, done: false, successfulContent: 0, freshContent: 0,
@@ -171,10 +174,10 @@ class Discovery {
     }
     try {
       const result = await provider.request(job.kind, job.params, { purpose: 'discovery', sourceKey: job.sourceKey,
-        forceFresh: CONTENT_KINDS.has(job.kind) && state.freshContent === 0 });
+        forceFresh: yieldsNotes(job.kind) && state.freshContent === 0 });
       if (result.cacheWarning && !this.progress.gaps.includes('CACHE_UNAVAILABLE')) this.progress.gaps.push('CACHE_UNAVAILABLE');
       if (result.cached) state.cacheHits++;
-      if (CONTENT_KINDS.has(job.kind)) {
+      if (yieldsNotes(job.kind)) {
         const notes = await provider.notes(result);
         await this.addNotes(notes, { key: job.sourceKey, type: job.origin, label: job.label });
         state.successfulContent++; if (!result.cached) state.freshContent++;

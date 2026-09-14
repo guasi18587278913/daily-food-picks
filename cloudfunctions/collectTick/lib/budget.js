@@ -1,6 +1,7 @@
 'use strict';
 
 const { createHash } = require('node:crypto');
+const { endpoint } = require('./endpoints');
 
 const PRICE_URL = 'https://tikhub.io/xiaohongshu-api';
 const PRICE_MICRO_USD = 10000;
@@ -60,14 +61,15 @@ function attemptId(roundId, requestKey, attempt) {
 
 async function reserveAttempt(store, request) {
   const { roundId, requestKey, kind, attempt, now, lease, limits, price, validation = false } = request;
-  const isDiscoveryKind = ['search', 'hot', 'inspiration', 'topic', 'faved'].includes(kind);
-  const purpose = request.purpose || (isDiscoveryKind ? 'discovery' : 'inspection');
+  const spec = endpoint(kind);
+  const discoveryOnly = spec?.discoveryOnly === true;
+  const purpose = request.purpose || (discoveryOnly ? 'discovery' : 'inspection');
   validateLimits(limits);
   validatePrice(price, now);
   if (!/^\d{8}-\d{4}$/.test(roundId || '') || typeof requestKey !== 'string' || !requestKey
-    || requestKey.length > 300 || !['search', 'author', 'user', 'note_image', 'note_video', 'hot', 'inspiration', 'topic', 'faved'].includes(kind)
+    || requestKey.length > 300 || !spec
     || !integer(attempt, 1, 2) || !['discovery', 'inspection'].includes(purpose)
-    || (isDiscoveryKind && purpose !== 'discovery')
+    || (discoveryOnly && purpose !== 'discovery')
     || (request.sourceKey !== undefined && !/^source_[a-f0-9]{48}$/.test(request.sourceKey))) fail('INVALID_REQUEST');
   const day = shanghaiDay(now);
   const id = attemptId(roundId, requestKey, attempt);
