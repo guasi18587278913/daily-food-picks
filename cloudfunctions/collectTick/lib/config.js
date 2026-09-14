@@ -38,6 +38,19 @@ function overlapsScheduledWindow(start, config) {
     return start < opens + minutes * 60000 && end > opens;
   }));
 }
+function validateSupplement(config, env) {
+  if (!env.DFP_SUPPLEMENT_AT && !env.DFP_SUPPLEMENT_CALLS) return;
+  if (!config.supplementAt || !config.supplementCalls) throw error('INVALID_SUPPLEMENT_CONFIG');
+  const start = Date.parse(config.supplementAt);
+  const end = start + REGULAR_WINDOW_MINUTES * 60000;
+  const validation = config.validationAt ? Date.parse(config.validationAt) : NaN;
+  if (!validInstant(config.supplementAt) || start % 60000 !== 0
+    || (config.sweepCalls && start < sweepWindow(start).closesAt)
+    || shanghaiDay(start) !== shanghaiDay(end) || overlapsScheduledWindow(start, config)
+    || (Number.isFinite(validation) && start < validation + REGULAR_WINDOW_MINUTES * 60000 && end > validation)) {
+    throw error('INVALID_SUPPLEMENT_TIME');
+  }
+}
 function loadConfig(env = process.env) {
   const config = {
     enabled: env.DFP_ENABLED === 'true',
@@ -47,6 +60,7 @@ function loadConfig(env = process.env) {
     sweepCalls: number(env.DFP_SWEEP_CALLS, 100),
     validationCalls: number(env.DFP_VALIDATION_CALLS, 20), validationMicroUsd: number(env.DFP_VALIDATION_MICRO_USD, 200000),
     validationAt: env.DFP_VALIDATION_AT || null,
+    supplementAt: env.DFP_SUPPLEMENT_AT || null, supplementCalls: number(env.DFP_SUPPLEMENT_CALLS, 20),
     timerSecret: env.DFP_TIMER_SECRET || '',
     freeAiConfirmed: env.DFP_FREE_AI_CONFIRMED === 'true',
     aiProvider: env.DFP_AI_PROVIDER || 'hunyuan-v3', aiModel: env.DFP_AI_MODEL || 'hy3',
@@ -64,6 +78,7 @@ function loadConfig(env = process.env) {
   if (config.enabled && !/^[a-f0-9]{64}$/.test(config.timerSecret)) throw error('CONFIGURATION_INCOMPLETE');
   if (config.validationAt && (!validInstant(config.validationAt)
     || overlapsScheduledWindow(Date.parse(config.validationAt), config))) throw error('INVALID_VALIDATION_TIME');
+  validateSupplement(config, env);
   return config;
 }
 
@@ -86,10 +101,14 @@ function scheduledRound(now, config) {
   const nowMinute = shifted.getUTCMinutes();
   let start;
   let validation = false;
+  let supplement = false;
   let kind = 'regular';
   let windowMinutes = REGULAR_WINDOW_MINUTES;
   const v = config.validationAt ? Date.parse(config.validationAt) : NaN;
-  if (Number.isFinite(v) && now >= v && now < v + REGULAR_WINDOW_MINUTES * 60000) { start = v; validation = true; }
+  const extra = config.supplementAt ? Date.parse(config.supplementAt) : NaN;
+  if (Number.isFinite(extra) && config.supplementCalls && now >= extra && now < extra + REGULAR_WINDOW_MINUTES * 60000) {
+    start = extra; supplement = true;
+  } else if (Number.isFinite(v) && now >= v && now < v + REGULAR_WINDOW_MINUTES * 60000) { start = v; validation = true; }
   else if (nowHour === SWEEP_HOUR && config.sweepCalls) {
     if (nowMinute >= SWEEP_WINDOW_MINUTES) return null;
     start = sweepWindow(now).scheduledAt;
@@ -104,10 +123,12 @@ function scheduledRound(now, config) {
   const id = `${d.toISOString().slice(0, 10).replaceAll('-', '')}-${pad(hour)}${pad(d.getUTCMinutes())}`;
   const regularDailyCalls = config.dailyCalls - (config.sweepCalls || 0);
   const allocation = Math.ceil(regularDailyCalls / 3);
-  const roundCalls = validation ? config.validationCalls
+  const allocationFor = hour => hour === 20 ? regularDailyCalls - 2 * allocation : allocation;
+  const roundCalls = supplement ? config.supplementCalls : validation ? config.validationCalls
     : kind === 'sweep' ? config.sweepCalls : (hour === 20 ? regularDailyCalls - 2 * allocation : allocation);
+  const reservedRegularCalls = supplement ? REGULAR_HOURS.filter(h => h > hour).reduce((sum, h) => sum + allocationFor(h), 0) : 0;
   return { id, day: shanghaiDay(start), scheduledAt: start, closesAt: start + windowMinutes * 60000, validation, kind,
-    sweepEnabled: Boolean(config.sweepCalls), roundCalls };
+    sweepEnabled: Boolean(config.sweepCalls), roundCalls, ...(supplement ? { supplement: true, reservedRegularCalls } : {}) };
 }
 
 module.exports = { loadConfig, assertTimer, scheduledRound, sweepWindow, error };

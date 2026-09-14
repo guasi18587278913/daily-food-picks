@@ -178,3 +178,9 @@ docs/operations/wechat-trial-runbook.md
 验证：先写视频证据和公平检查的失败用例，再跑collector/runner/daily-sweep/safety/publishing/provider-diagnostics范围检查；真实样本只使用少量脱敏文字，不把原始响应加入Git；如做模型抽核，固定已授权hunyuan-v3/hy3赠额通道、最多20次、每次最多1024输出Token、35秒超时、无付费回退、无TikHub请求。记录离线行为测试与模型实际判断的不同证据。
 
 部署时只更新collectTick，从整合源码生成副本并检查包结构；避开未完成的采集轮次，不清预算、不手动补跑。原定时轮次用于效果观察，验收不承诺固定数量。跨模块改动按共同规范独立审查，修复后复审。
+
+## 2026-09-14 受控补跑方案
+
+新增服务端DFP_SUPPLEMENT_AT/DFP_SUPPLEMENT_CALLS成对配置，默认关闭；仅接受整分钟、同日20分钟窗口、不与已有窗口重叠、单轮最多20次。scheduledRound生成kind=regular、supplement=true、validation=false的独立轮次，并固定reservedRegularCalls（本次13点后为16）。预算预留事务同时保护该预留额度和金额，原initial-validation约束不变。runner沿用已审流程，只给覆盖说明加“临时补跑”。
+
+先补调度、预算预留、首验隔离、重复和发布回归，再独立审查。只更新collectTick；部署时无在途任务。用管理员SDK和既有服务端口令推进唯一补跑窗口，不改全局cron、不构造假用户身份、不清账、不回写过去轮次。调用前再核对余量与公开单价，最多20次TikHub/0.20美元、最多20次现有赠额模型、无付费回退；正常或异常结束后均移除临时配置并回读。有效结果按原发布规则供小程序读取，失败保留旧快照。

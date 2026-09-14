@@ -77,6 +77,12 @@ async function reserveAttempt(store, request) {
     const daily = await tx.get('dfp_budgets', day) || { calls: 0, microUsd: 0 };
     const trial = validation ? (await tx.get('dfp_budgets', 'initial-validation') || { calls: 0, microUsd: 0 }) : null;
     if (daily.calls + 1 > limits.dailyCalls || daily.microUsd + price.microUsd > limits.dailyMicroUsd) fail('DAILY_BUDGET');
+    if (round.definition?.supplement === true) {
+      const kept = round.definition.reservedRegularCalls;
+      if (!integer(kept, 0, 50)) fail('INVALID_BUDGET');
+      if (daily.calls + 1 + kept > limits.dailyCalls
+        || daily.microUsd + (1 + kept) * price.microUsd > limits.dailyMicroUsd) fail('SUPPLEMENT_BUDGET');
+    }
     // Only the 06:00 sweep may use up to 100 calls; every other round keeps the original 20-call ceiling.
     const roundCeiling = round.definition?.kind === 'sweep' ? 100 : 20;
     if ((round.calls || 0) + 1 > Math.min(limits.roundCalls, roundCeiling)) fail('ROUND_BUDGET');

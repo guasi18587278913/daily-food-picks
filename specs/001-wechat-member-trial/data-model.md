@@ -13,6 +13,7 @@
 - `progress`: 已完成逻辑请求及阶段；最多一次自动重试，不从头重买。
 - `progress.candidateIds`: 建队列时固定检查顺序。常规轮按本周→低粉→仅今日交错后截取40个；恢复时沿用该序列，不因规则部署重新排序。
 - `definition.kind`: `regular`（09/12/20，窗口 20 分钟）或 `sweep`（06:00 今日新锐扫描，窗口 30 分钟）；缺省按 regular 处理。`definition.sweepEnabled` 记录建轮时是否已配置 06:00 扫描额度。
+- 受控补跑使用`kind=regular`、`supplement=true`、`validation=false`，其独立轮次最多20次；`reservedRegularCalls`固定后续正式轮次需保留的额度，并在日预算预留事务中同时保护次数和金额。首验账本不因补跑重置或复用。
 - `coverage`: 关键词、页数、类型、候选数、缺口和停止原因。常规轮发布时另含 `carriedToday`：当天 06:00 快照编号和带上的今日作品数；未启用扫描或 06:30 前的轮次为 null；06:00 缺失、未发布或读取失败时 count 为 0，并用 `errorCode`（SWEEP_MISSING / SWEEP_NOT_PUBLISHED / CORRUPT_SNAPSHOT / NOT_FOUND / CARRY_READ_FAILED）说明；前两种对应本轮缺口 SWEEP_UNAVAILABLE，后三种对应 CARRY_UNAVAILABLE。临时读取失败先在本轮窗口内重试。带上的作品保留首个推荐轮次和原有板块，不新增推荐记录或搜索行。
 - `snapshotId`: 校验并发布后才设置；非发布状态为 null。
 

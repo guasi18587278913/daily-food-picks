@@ -82,6 +82,7 @@ const REASONS = {
   MODEL_UNAVAILABLE: '内容判断服务暂不可用，保留已完成的选题。', PROVIDER_AUTH: '数据服务授权异常，本轮已停止。',
   CANDIDATE_CAP: '本轮候选较多，按限定范围完成了一部分。', REQUEST_FAILED: '部分数据请求失败，保留已完成的选题。',
   AI_CALL_CAP: '本轮内容判断次数已达上限，保留已完成的选题。',
+  SUPPLEMENT_BUDGET: '已为后续正式轮次保留额度，临时补跑结束。',
   SWEEP_UNAVAILABLE: '今天 06:00 的今日新锐没有更新成功，本轮只展示新找到的选题。',
   CARRY_UNAVAILABLE: '今天 06:00 的今日新锐读取失败，本轮只展示新找到的选题。'
 };
@@ -116,7 +117,8 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
   const coverage = { keywords: searches(round).map(x => x.keyword).filter((v, i, a) => a.indexOf(v) === i),
     pagesPerQuery: 1, successfulSearches: progress.successfulSearches, candidateCount: progress.candidateIds?.length || rows.length,
     processed: progress.candidateIndex || 0, gaps, notice: round.kind === 'sweep' ? KEYWORDS.dailySweep.coverageNotice : KEYWORDS.coverageNotice,
-    ruleVersion: RULES.version };
+    ruleVersion: RULES.version, ...(round.supplement ? { supplement: true } : {}) };
+  if (round.supplement) coverage.notice = `临时补跑。${coverage.notice}`;
   // A rejected query does not erase completed searches. Total provider failure or an unavailable
   // classifier still retains the old snapshot; partial discovery can publish an honest zero result.
   const serviceFailed = ['PROVIDER_AUTH', 'MODEL_UNAVAILABLE'].includes(reason);
@@ -191,7 +193,7 @@ async function runTick({ store, config, key, generate, upload, clock = Date.now,
           }
           progress.successfulSearches++;
         } catch (e) {
-          if (['TICK_LIMIT', 'DAILY_BUDGET', 'ROUND_BUDGET', 'VALIDATION_BUDGET', 'PROVIDER_AUTH', 'LEASE_EXPIRED'].includes(e.code)) throw e;
+          if (['TICK_LIMIT', 'DAILY_BUDGET', 'ROUND_BUDGET', 'VALIDATION_BUDGET', 'SUPPLEMENT_BUDGET', 'PROVIDER_AUTH', 'LEASE_EXPIRED'].includes(e.code)) throw e;
           progress.gaps.push('REQUEST_FAILED');
         }
         progress.searchIndex++;
@@ -266,7 +268,7 @@ async function runTick({ store, config, key, generate, upload, clock = Date.now,
           progress.candidateIndex++; await saveProgress(store, lease, round.id, progress, clock);
         } else throw error('INVALID_STAGE');
       } catch (e) {
-        if (['TICK_LIMIT', 'DAILY_BUDGET', 'ROUND_BUDGET', 'VALIDATION_BUDGET', 'PROVIDER_AUTH', 'LEASE_EXPIRED', 'MODEL_UNAVAILABLE', 'AI_CALL_CAP'].includes(e.code)) throw e;
+        if (['TICK_LIMIT', 'DAILY_BUDGET', 'ROUND_BUDGET', 'VALIDATION_BUDGET', 'SUPPLEMENT_BUDGET', 'PROVIDER_AUTH', 'LEASE_EXPIRED', 'MODEL_UNAVAILABLE', 'AI_CALL_CAP'].includes(e.code)) throw e;
         row.stage = 'skipped'; row.errorCode = 'REQUEST_FAILED'; await save();
         progress.gaps.push('REQUEST_FAILED');
         progress.candidateIndex++; await saveProgress(store, lease, round.id, progress, clock);

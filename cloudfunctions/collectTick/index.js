@@ -18,7 +18,7 @@ exports.main = async (event, runtimeContext) => {
       generate: freeModelGenerator(app), upload: options => wx.uploadFile(options) });
   } catch (e) {
     const code = ['UNAUTHORIZED_TRIGGER', 'CONFIGURATION_INCOMPLETE', 'FREE_AI_ONLY', 'INVALID_VALIDATION_TIME',
-      'LEASE_EXPIRED', 'UNVERIFIED_PRICE'].includes(e.code) ? e.code : 'COLLECTOR_UNAVAILABLE';
+      'INVALID_SUPPLEMENT_CONFIG', 'INVALID_SUPPLEMENT_TIME', 'LEASE_EXPIRED', 'UNVERIFIED_PRICE'].includes(e.code) ? e.code : 'COLLECTOR_UNAVAILABLE';
     console.error(JSON.stringify({ code }));
     return { status: 'failed', error: { code } };
   }

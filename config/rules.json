@@ -1,5 +1,5 @@
 {
-  "version": "2026-09-14-video-intent-board-turns",
+  "version": "2026-09-14-bounded-supplement",
   "timezone": "Asia/Shanghai",
   "scheduleHours": [9, 12, 20],
   "windowMinutes": 20,
