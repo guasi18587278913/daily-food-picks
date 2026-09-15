@@ -9,11 +9,17 @@
 - 当前产品是原生微信小程序；代码在 `miniprogram/`、`cloudfunctions/`。旧网页保留根目录运行结构。
 - 历史研究在 `docs/archive/collection-research/`，只作溯源；原始响应、试跑和 `.local/` 不作为当前需求。
 
+## 每个开发任务的入口
+
+收到新增功能、继续开发、修复或重构请求后，在首次修改业务代码前，先读取并执行项目 [food-picks-sdd](.agents/skills/food-picks-sdd/SKILL.md)。确认本次功能、当前阶段、对应任务或小改范围与验收方式，用一句话说明后按已有授权继续。
+
+同一任务的后续轮次复用已核对的材料；目标、材料或代码状态变化时重新核对。新任务重新确认入口，不能未经核对沿用上一任务的功能选择。只讨论或只审查时保持用户要求的只读范围。
+
 ## 开发前读取
 
 1. [项目长期原则](.specify/memory/constitution.md)。
 2. [风险与规范入口](docs/standards/README.md)，再按任务读对应细则。
-3. 使用项目 `food-picks-sdd` Skill 接续既有 Spec Kit；详细流程见 [SDD 工作流](docs/workflow.md)。
+3. 按上述开发入口接续既有 Spec Kit；跨工具交接与文档分工见 [SDD 工作流](docs/workflow.md)。
 4. 当前功能以用户明确指定为先，否则读取 `.specify/feature.json`；新工作树可能没有该指针，按工作流识别新功能或已有任务，再核对材料与 Git 状态。
 
 只读讨论和资料整理按实际目标执行，不因读到 Skill 示例就自动改代码。当前明确用户指令和已获授权优先，不重复申请同一许可。

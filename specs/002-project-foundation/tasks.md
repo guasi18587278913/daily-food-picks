@@ -1,7 +1,7 @@
 # Tasks: 统一目录与双工具 SDD 开发地基
 
 **Input**: [spec.md](spec.md)、[plan.md](plan.md)、[research.md](research.md)、[data-model.md](data-model.md)、[quickstart.md](quickstart.md)。
-**Status**: 16 项任务均已完成；迁移、共享入口、归档与验证见[整理记录](../../docs/operations/project-organization.md)。原业务功能指针已恢复到 001。
+**Status**: 原迁移任务 T001–T016 已完成，详见[整理记录](../../docs/operations/project-organization.md)。2026-09-16 追加开发入口加固 T017–T018，状态与证据见下文；当前业务功能以本工作区指针或用户指定为准。
 **路径**: 相对统一后的项目根目录；不更改业务逻辑、推送或部署。
 
 ## Phase 1: Setup
@@ -55,3 +55,21 @@
 ## Implementation Strategy
 
 三类场景全部完成；不只交付目录树或规范草稿。当前业务功能的未完成项继续留在 001 功能，不挪到整理任务中冒充完成。
+
+## 2026-09-16 开发入口加固
+
+**目标与范围**：接续 FR-004、FR-005，落实用户认可的 `AGENTS.md` 与现有开发 Skill 入口方案。此次只修改共同入口、共享 Skill 和本任务记录；Hook 与真实会话自动触发验收另行记录，不改业务源码或其他功能的历史任务。
+
+**验收**：开发任务在首次修改业务代码前确认功能、阶段、任务或小改范围与验收；默认指针与目标不符时重新定位；按任务实施的功能缺少必要材料时先补齐；小改和只读讨论保留既有分流；任务状态在原条目回写。
+
+- [x] T017 [US2] 在 `AGENTS.md` 明确每个开发任务的入口动作，在 `.agents/skills/food-picks-sdd/SKILL.md` 完善功能核对、材料缺失处理与任务回写。
+- [x] T018 [US2] 验证 Skill 格式、双工具共享入口、本地引用与只读功能定位；自审各流程分支，记录实际验证范围和未验证项。
+
+### 本地验证与交接
+
+- **源码范围**：以 GitHub `main` 的 `8ab4b4e` 为基线，在 `chore/sdd-entry-checks` 独立工作树修改上述三个文件。本记录适用于包含它的提交；原主工作区的其他业务提交不纳入本次提交。
+- **Skill 格式**：`python3 /Users/liyadong/.codex/skills/.system/skill-creator/scripts/quick_validate.py .agents/skills/food-picks-sdd` 通过，退出码 0。
+- **结构与定位**：本地 Python 只读检查 6 项通过、0 失败、0 跳过，退出码 0。覆盖 Claude 导入、共享 Skill 同源可读、18 个本地引用、任务编号唯一、新工作树无指针、显式选择 002 且不创建指针。
+- **差异自审**：新功能从 specify 开始；继续任务缺材料先补齐；小改保留简化路径；讨论保持只读；指针与目标不符重新定位；已授权任务继续执行。按文本检查这些分支，没有把自审计为真实会话触发测试。`git diff --check` 通过，退出码 0。
+- **实际限制**：未新开真实 Codex／Claude Code 会话验证自然语言自动触发；未安装 Hook；未运行业务测试、推送或部署。规则已加固，自动触发可靠性尚未验收。
+- **下一步**：在两个助手的新会话中验证新增功能、继续任务、小改与只读讨论的实际入口行为，记录是否读取共享 Skill、是否选中正确功能及是否产生预期文件改动；再据实际遗漏决定是否接入 Hook。
