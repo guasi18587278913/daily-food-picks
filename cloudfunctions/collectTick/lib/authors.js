@@ -1,10 +1,12 @@
 'use strict';
-// Follower observations per author and the rising-account rule (seven-day gain of at least 1,000 followers).
+// Follower observations per author and the rising-account rule: within seven days the account gained at least 10% of
+// its starting followers and at least 500 in absolute terms. A flat 1,000 favoured large accounts, whose weekly drift
+// alone clears it; the rate makes a 5,000-follower account need 500 and a 200,000-follower account need 20,000.
 // Every place that learns an author's follower count records it here; a bounded index keeps the tracked set small.
 const { assertLease } = require('./budget');
 const { ID } = require('./endpoints');
 const HOUR = 3600000, DAY = 86400000;
-const RULES = Object.freeze({ maxPoints: 40, keepDays: 14, maxTracked: 200, windowDays: 7, minimumGain: 1000,
+const RULES = Object.freeze({ maxPoints: 40, keepDays: 14, maxTracked: 200, windowDays: 7, minimumGain: 500, minimumRate: 0.1,
   minimumSpanMs: 12 * HOUR, maxPerRound: 10, recheckPerRound: 8, recheckAfterMs: 20 * HOUR, recentNotes: 5, notesPerAccount: 3 });
 const INDEX_ID = 'fans_history_index_v1';
 // A re-check that answers nothing still moves the author to the back of the queue; otherwise a deleted account
@@ -37,6 +39,10 @@ function gainWithin(points, now) {
   const first = window[0], last = window[window.length - 1];
   if (last.at - first.at < RULES.minimumSpanMs) return null;
   return { gain: last.fans - first.fans, spanMs: last.at - first.at, baselineAt: first.at, fansBefore: first.fans, fans: last.fans, observedAt: last.at };
+}
+// Both bars must clear: the rate keeps large accounts' ordinary drift out, the floor keeps tiny accounts' noise out.
+function qualifies(growth) {
+  return !!growth && growth.gain >= RULES.minimumGain && growth.gain >= growth.fansBefore * RULES.minimumRate;
 }
 function summarize(doc, now) {
   const points = prunePoints(doc?.points || [], now);
@@ -92,11 +98,12 @@ async function risingAccounts(store, now, limit = RULES.maxPerRound) {
     if (accounts.length >= limit) break;
     const doc = await store.get('dfp_results', historyId(authorId));
     const { growth } = summarize(doc, now);
-    if (!growth || growth.gain < RULES.minimumGain || await publishedRecently(store, authorId, now)) continue;
+    if (!qualifies(growth) || await publishedRecently(store, authorId, now)) continue;
     accounts.push({ authorId, author: doc.author || null, fans: growth.fans, fansBefore: growth.fansBefore, fansDelta: growth.gain,
+      gainRate: growth.fansBefore > 0 ? Math.round(growth.gain / growth.fansBefore * 1000) / 1000 : null,
       observedAt: new Date(growth.observedAt).toISOString(), baselineAt: new Date(growth.baselineAt).toISOString(),
       spanHours: Math.round(growth.spanMs / HOUR), notes: (doc.recentNotes || []).slice(0, RULES.notesPerAccount) });
   }
   return accounts;
 }
-module.exports = { RULES, INDEX_ID, historyId, publishedId, prunePoints, gainWithin, summarize, recordFansObservation, markRecheckAttempt, selectRecheck, publishedRecently, risingAccounts };
+module.exports = { RULES, INDEX_ID, historyId, publishedId, prunePoints, gainWithin, qualifies, summarize, recordFansObservation, markRecheckAttempt, selectRecheck, publishedRecently, risingAccounts };

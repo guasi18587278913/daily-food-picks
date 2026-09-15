@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { normalizeNote, parseResponse, validateParams, verifyPrice, splitResultNotes, imageUrl } = require('../cloudfunctions/collectTick/lib/provider');
-const { historyBaseline, eligibleBoards } = require('../cloudfunctions/collectTick/lib/ranking');
+const { historyBaseline, eligibleBoards, engageRatio } = require('../cloudfunctions/collectTick/lib/ranking');
 const { parseJudgment, judgeNote } = require('../cloudfunctions/collectTick/lib/judge');
 const { scheduledRound } = require('../cloudfunctions/collectTick/lib/config');
 const { NOW } = require('./helpers');
@@ -31,19 +31,23 @@ test('unknown pin status, zero median, incomplete chronology cannot produce a ra
   assert.equal(historyBaseline(candidate(), history().map(x => ({ ...x, likes: 0 }))).ratio, null);
   assert.equal(historyBaseline(candidate(), history().map(x => ({ ...x, publishedAt: null }))).ratio, null);
 });
-test('windows include the lower boundary, exclude the upper boundary, and the saves board needs more saves than likes', () => {
+test('windows include the lower boundary, exclude the upper boundary, and the engage board needs comments plus shares at 15% of likes', () => {
   assert.deepEqual(eligibleBoards(candidate({ publishedAt: new Date(NOW).toISOString() }), NOW), []);
-  assert.deepEqual(eligibleBoards(candidate({ publishedAt: new Date(NOW - 7 * 86400000).toISOString(), likes: 300, collected: 400 }), NOW), ['saves']);
-  assert.deepEqual(eligibleBoards(candidate({ publishedAt: new Date(NOW - 7 * 86400000 - 1).toISOString(), likes: 300, collected: 400 }), NOW), []);
+  assert.deepEqual(eligibleBoards(candidate({ publishedAt: new Date(NOW - 7 * 86400000).toISOString(), likes: 300, comments: 30, shared: 15 }), NOW), ['engage']);
+  assert.deepEqual(eligibleBoards(candidate({ publishedAt: new Date(NOW - 7 * 86400000 - 1).toISOString(), likes: 300, comments: 30, shared: 15 }), NOW), []);
   assert.deepEqual(eligibleBoards(candidate({ likes: 10000, fans: 5001 }), NOW), ['today', 'week']);
-  assert.deepEqual(eligibleBoards(candidate({ likes: 10000, collected: 10001 }), NOW), ['today', 'week', 'saves']);
+  assert.deepEqual(eligibleBoards(candidate({ likes: 10000, comments: 1200, shared: 300 }), NOW), ['today', 'week', 'engage']);
   assert.deepEqual(eligibleBoards(candidate({ likes: null, fans: null }), NOW), []);
-  assert.deepEqual(eligibleBoards(candidate({ likes: 299, collected: 500 }), NOW), []);
-  assert.deepEqual(eligibleBoards(candidate({ likes: 300, collected: 300 }), NOW), []);
-  assert.deepEqual(eligibleBoards(candidate({ likes: 300, collected: 301 }), NOW), ['saves']);
-  assert.deepEqual(eligibleBoards(candidate({ likes: 300, collected: null }), NOW), []);
-  // Follower counts no longer gate any board.
-  assert.deepEqual(eligibleBoards(candidate({ likes: 300, collected: 301, fans: 900000 }), NOW), ['saves']);
+  assert.deepEqual(eligibleBoards(candidate({ likes: 299, comments: 100, shared: 100 }), NOW), []);
+  assert.deepEqual(eligibleBoards(candidate({ likes: 300, comments: 30, shared: 14 }), NOW), []);
+  assert.deepEqual(eligibleBoards(candidate({ likes: 300, comments: 45, shared: 0 }), NOW), ['engage']);
+  // An unknown share count lowers the ratio; an unknown comment count leaves it undefined.
+  assert.deepEqual(eligibleBoards(candidate({ likes: 300, comments: 45, shared: null }), NOW), ['engage']);
+  assert.deepEqual(eligibleBoards(candidate({ likes: 300, comments: 30, shared: null }), NOW), []);
+  assert.deepEqual(eligibleBoards(candidate({ likes: 300, comments: null, shared: 200 }), NOW), []);
+  // Saves and follower counts no longer gate any board.
+  assert.deepEqual(eligibleBoards(candidate({ likes: 300, collected: 900, comments: 1, shared: 0, fans: 900000 }), NOW), []);
+  assert.equal(engageRatio(candidate({ likes: 300, comments: 45, shared: 15 })), 0.2);
 });
 test('the recorded Rednote image CDN is supported without accepting arbitrary image hosts', () => {
   assert.equal(imageUrl('https://sns-i11.rednotecdn.com/image.jpg'), 'https://sns-i11.rednotecdn.com/image.jpg');

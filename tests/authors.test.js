@@ -84,18 +84,21 @@ test('an account that answers nothing goes to the back of the queue instead of l
   assert.equal((await store.get('dfp_results', INDEX_ID)).authors[id(1)].lastAttemptAt, NOW);
 });
 
-test('rising accounts need a thousand-follower gain, are ranked by gain, capped and not repeated within seven days', async () => {
+test('rising accounts need a tenth of their followers and at least five hundred, are ranked by gain, capped and not repeated within seven days', async () => {
   const { store, lease } = await setup();
   const grow = async (n, before, after, span = 2 * DAY) => {
     await recordFansObservation(store, lease, { authorId: id(n), author: `作者${n}`, fans: before, at: NOW - span, note: { noteId: id(100 + n), title: `作品${n}`, likes: 500, collected: 900 } }, NOW - span);
     await recordFansObservation(store, lease, { authorId: id(n), fans: after, at: NOW }, NOW);
   };
-  await grow(1, 4000, 5000); await grow(2, 10000, 13000); await grow(3, 8000, 8999); await grow(4, 20000, 21500);
+  // 1: +25%; 2: +30%; 3: +4.9% (rate fails); 4: +7.5% (rate fails, and published lately anyway); 6: +400 (floor fails); 7: +0.6% on a big base.
+  await grow(1, 4000, 5000); await grow(2, 10000, 13000); await grow(3, 8000, 8399); await grow(4, 20000, 21500);
+  await grow(6, 1000, 1400); await grow(7, 200000, 201200);
   await recordFansObservation(store, lease, { authorId: id(5), fans: 90000, at: NOW }, NOW);
   await store.put('dfp_results', `rising_published_${id(4)}`, { snapshotId: 'earlier', at: NOW - 6 * DAY });
   const accounts = await risingAccounts(store, NOW);
   assert.deepEqual(accounts.map(a => [a.authorId, a.fansDelta, a.spanHours, a.notes.length]), [[id(2), 3000, 48, 1], [id(1), 1000, 48, 1]]);
   assert.equal(accounts[0].author, '作者2'); assert.equal(accounts[0].fansBefore, 10000); assert.equal(accounts[0].fans, 13000);
+  assert.deepEqual(accounts.map(a => a.gainRate), [0.3, 0.25]);
   assert.equal(await publishedRecently(store, id(4), NOW), true);
   assert.equal(await publishedRecently(store, id(4), NOW + 2 * DAY), false);
   assert.deepEqual((await risingAccounts(store, NOW, 1)).map(a => a.authorId), [id(2)]);

@@ -37,7 +37,7 @@
 .board-mark{flex:none;width:16rpx;height:16rpx;border-radius:6rpx;background:var(--accent)}
 .board-mark.week{background:var(--week)}
 .board-mark.rising{background:var(--dark)}
-.board-mark.saves{background:var(--accent-ink)}
+.board-mark.engage{background:var(--accent-ink)}
 .account-card{margin-top:20rpx;padding:24rpx;border-radius:32rpx;background:var(--card);box-shadow:0 2rpx 4rpx rgba(40,30,20,.04),0 12rpx 32rpx rgba(40,30,20,.06)}
 .account-head{display:flex;align-items:baseline;gap:16rpx}
 .account-name{flex:1;font-size:32rpx;font-weight:700}

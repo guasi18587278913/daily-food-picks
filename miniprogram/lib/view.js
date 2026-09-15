@@ -31,16 +31,18 @@ const UNCONFIRMED_REASON = {
 const BOARD_INFO = {
   today: { name: '今日热榜', subtitle: '近 24 小时 · 至少 1,000 赞', sort: 'ratio', options: [['ratio', '倍数'], ['likes', '点赞'], ['collected', '收藏'], ['comments', '评论']] },
   week: { name: '本周热门', subtitle: '近 7 天 · 至少 1 万赞', sort: 'likes', options: [['likes', '点赞'], ['collected', '收藏'], ['comments', '评论']] },
-  rising: { name: '黑马榜单', subtitle: '近 7 天涨粉 1,000 以上的账号', sort: 'likes', options: [] },
-  saves: { name: '收藏榜单', subtitle: '近 7 天 · 收藏多于点赞', sort: 'collected', options: [['collected', '收藏'], ['collectRatio', '藏赞比'], ['likes', '点赞']] }
+  rising: { name: '黑马榜单', subtitle: '近 7 天涨粉 10% 以上 · 至少涨 500 粉', sort: 'likes', options: [] },
+  engage: { name: '互动榜单', subtitle: '近 7 天 · 至少 300 赞 · 评论加转发不少于点赞的 15%', sort: 'engageRatio', options: [['engageRatio', '互动比'], ['comments', '评论'], ['shared', '转发'], ['likes', '点赞']] }
 };
 /** @param {FoodNote} note @param {string} board @param {string} sort @param {boolean} favorite */
 function card(note, board, sort, favorite) {
   const big = sort === 'ratio' ? note.ratio : sort === 'fanRatio' ? note.fanRatio : sort === 'collectRatio' ? note.collectRatio
-    : sort === 'collected' ? note.collected : sort === 'comments' ? note.comments : note.likes;
-  const unit = sort === 'ratio' || sort === 'fanRatio' || sort === 'collectRatio' ? '倍' : sort === 'collected' ? '收藏' : sort === 'comments' ? '评论' : '赞';
+    : sort === 'engageRatio' ? (typeof note.engageRatio === 'number' ? Math.round(note.engageRatio * 100) : null)
+    : sort === 'collected' ? note.collected : sort === 'comments' ? note.comments : sort === 'shared' ? note.shared : note.likes;
+  const unit = sort === 'ratio' || sort === 'fanRatio' || sort === 'collectRatio' ? '倍' : sort === 'engageRatio' ? '% 互动'
+    : sort === 'collected' ? '收藏' : sort === 'comments' ? '评论' : sort === 'shared' ? '转发' : '赞';
   const comparison = board === 'today' ? (note.baseline !== null && note.baseline > 0 ? `作者前 7 篇中位数 ${formatMetric(note.baseline)} 赞` : '作者参照不足，暂不计算倍数')
-    : board === 'saves' ? `${formatMetric(note.likes)} 赞 · 收藏是点赞的 ${formatMetric(note.collectRatio)} 倍`
+    : board === 'engage' ? `${formatMetric(note.likes)} 赞 · ${formatMetric(note.comments)} 评论 · ${formatMetric(note.shared)} 转发`
     : `${formatMetric(note.collected)} 收藏 · ${formatMetric(note.comments)} 评论`;
   const canOpenSource = canOpenOriginal(note);
   const unconfirmed = note.contentStatus === 'unconfirmed';
@@ -58,8 +60,9 @@ function card(note, board, sort, favorite) {
 function accountCard(account) {
   const hours = typeof account.spanHours === 'number' && Number.isFinite(account.spanHours) ? account.spanHours : null;
   const span = hours === null ? '观测跨度未知' : hours >= 48 ? `${Math.round(hours / 24)} 天内` : `${hours} 小时内`;
+  const rate = typeof account.gainRate === 'number' && Number.isFinite(account.gainRate) ? ` (+${Math.round(account.gainRate * 100)}%)` : '';
   return { authorId: account.authorId, displayName: account.author || '作者未提供',
-    deltaLabel: `+${formatMetric(account.fansDelta)}`, spanLabel: span,
+    deltaLabel: `+${formatMetric(account.fansDelta)}${rate}`, spanLabel: span,
     fansLabel: `${formatMetric(account.fansBefore)} → ${formatMetric(account.fans)} 粉丝`,
     observedLabel: `采集于 ${formatTime(account.observedAt, true)}`,
     notes: (account.notes || []).map(x => ({ noteId: x.noteId, title: x.title || '未提供标题',
@@ -67,7 +70,7 @@ function accountCard(account) {
 }
 /** @param {FoodNote[]} notes @param {Record<string,string>} sorts @param {(id:string)=>boolean} hasFavorite @param {RisingAccount[]} [accounts] */
 function boards(notes, sorts, hasFavorite, accounts = []) {
-  return /** @type {BoardKey[]} */ (['today', 'week', 'rising', 'saves']).map(key => {
+  return /** @type {BoardKey[]} */ (['today', 'week', 'rising', 'engage']).map(key => {
     const info = BOARD_INFO[key]; const sort = sorts[key] || info.sort;
     if (key === 'rising') {
       const rows = accounts.filter(x => x && typeof x.authorId === 'string');

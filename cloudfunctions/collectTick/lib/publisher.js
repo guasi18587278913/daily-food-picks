@@ -19,11 +19,11 @@ function contentTier(note) {
 }
 function publicNote(note) {
   const keys = ['noteId', 'title', 'author', 'authorId', 'type', 'publishedAt', 'likes', 'collected', 'comments',
-    'shared', 'fans', 'baseline', 'ratio', 'fanRatio', 'collectRatio', 'baselineReason', 'contentStatus', 'contentReason',
+    'shared', 'fans', 'baseline', 'ratio', 'fanRatio', 'collectRatio', 'engageRatio', 'baselineReason', 'contentStatus', 'contentReason',
     'sourceUrl', 'fileId', 'coverUrl', 'boards', 'firstRoundId'];
   return Object.fromEntries(keys.map(k => [k, note[k] ?? null]));
 }
-const BOARDS = ['today', 'week', 'saves', 'rising'];
+const BOARDS = ['today', 'week', 'engage', 'rising'];
 const metric = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
 // Only facts the page shows: identifiers, counts, times and up to three recent works by title.
 function publicAccount(account) {
@@ -31,6 +31,7 @@ function publicAccount(account) {
   const time = value => Number.isFinite(Date.parse(value)) ? new Date(Date.parse(value)).toISOString() : null;
   return { authorId: account.authorId, author: typeof account.author === 'string' ? account.author.slice(0, 120) : null,
     fans: metric(account.fans), fansBefore: metric(account.fansBefore), fansDelta: account.fansDelta,
+    gainRate: typeof account.gainRate === 'number' && Number.isFinite(account.gainRate) ? account.gainRate : null,
     observedAt: time(account.observedAt), baselineAt: time(account.baselineAt),
     spanHours: Number.isSafeInteger(account.spanHours) ? account.spanHours : null,
     notes: (Array.isArray(account.notes) ? account.notes : []).slice(0, 3).filter(n => /^[0-9a-f]{24}$/.test(n?.noteId || ''))

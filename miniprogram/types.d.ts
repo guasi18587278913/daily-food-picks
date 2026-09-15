@@ -1,11 +1,12 @@
-type BoardKey = 'today' | 'week' | 'rising' | 'saves';
-type SortKey = 'likes' | 'ratio' | 'fanRatio' | 'collectRatio' | 'collected' | 'comments';
+type BoardKey = 'today' | 'week' | 'rising' | 'engage';
+type SortKey = 'likes' | 'ratio' | 'fanRatio' | 'collectRatio' | 'engageRatio' | 'collected' | 'comments' | 'shared';
 interface RisingAccount {
   authorId: string;
   author: string | null;
   fans: number | null;
   fansBefore: number | null;
   fansDelta: number;
+  gainRate?: number | null;
   observedAt: string | null;
   baselineAt: string | null;
   spanHours: number | null;
@@ -26,6 +27,8 @@ interface FoodNote {
   ratio: number | null;
   fanRatio: number | null;
   collectRatio: number | null;
+  engageRatio?: number | null;
+  shared?: number | null;
   contentStatus?: 'confirmed' | 'unconfirmed' | null;
   contentReason?: string | null;
   baseline: number | null;

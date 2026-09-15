@@ -7,7 +7,7 @@ const { claimLease, releaseLease, assertLease, validatePrice } = require('./budg
 const { scheduledRound, sweepWindow, error } = require('./config');
 const { Provider, verifyPrice } = require('./provider');
 const { detailKind } = require('./endpoints');
-const { eligibleBoards, historyBaseline, inWindow } = require('./ranking');
+const { eligibleBoards, engageRatio, historyBaseline, inWindow } = require('./ranking');
 const { judgeNote, needsTextModel } = require('./judge');
 const { publish, previouslyPublished, readSnapshot, storeCover } = require('./publisher');
 const KEYWORDS = require('../config/keywords.json');
@@ -70,15 +70,15 @@ function prioritizeRecipeClues(rows) {
 function prioritizeCandidates(rows, round) {
   const ordered = prioritizeRecipeClues(rows);
   if (round?.kind !== 'regular' || !Number.isFinite(round.scheduledAt)) return ordered;
-  const queues = { week: [], saves: [], today: [], other: [] };
+  const queues = { week: [], engage: [], today: [], other: [] };
   for (const row of ordered) {
     const boards = eligibleBoards(row.note, round.scheduledAt);
-    const group = boards.includes('week') ? 'week' : boards.includes('today') ? 'today' : boards.includes('saves') ? 'saves' : 'other';
+    const group = boards.includes('week') ? 'week' : boards.includes('today') ? 'today' : boards.includes('engage') ? 'engage' : 'other';
     queues[group].push(row);
   }
   const result = [];
-  while (queues.week.length || queues.saves.length || queues.today.length) {
-    for (const group of ['week', 'saves', 'today']) if (queues[group].length) result.push(queues[group].shift());
+  while (queues.week.length || queues.engage.length || queues.today.length) {
+    for (const group of ['week', 'engage', 'today']) if (queues[group].length) result.push(queues[group].shift());
   }
   return [...result, ...queues.other];
 }
@@ -455,6 +455,7 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           row.note.boards = eligibleBoards(row.note, round.scheduledAt);
           row.note.fanRatio = Number.isSafeInteger(row.note.fans) && row.note.fans > 0 ? Math.round(row.note.likes / row.note.fans * 10) / 10 : null;
           row.note.collectRatio = Number.isSafeInteger(row.note.collected) && row.note.likes > 0 ? Math.round(row.note.collected / row.note.likes * 100) / 100 : null;
+          row.note.engageRatio = engageRatio(row.note);
           row.note.contentStatus = row.note.judgment?.verdict === 'cooking' ? 'confirmed' : 'unconfirmed';
           row.note.contentReason = row.note.contentStatus === 'confirmed' ? null : unconfirmedReason(row);
           row.stage = 'cover'; await save();

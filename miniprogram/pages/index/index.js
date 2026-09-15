@@ -264,7 +264,7 @@ Page({
   /** @param {{currentTarget:{dataset:Record<string,string>}}} event */
   onSort(event) {
     const { board, sort } = event.currentTarget.dataset;
-    if (!['today', 'week', 'saves'].includes(board) || !['ratio', 'fanRatio', 'collectRatio', 'likes', 'collected', 'comments'].includes(sort)) return;
+    if (!['today', 'week', 'engage'].includes(board) || !['ratio', 'fanRatio', 'collectRatio', 'engageRatio', 'likes', 'collected', 'comments', 'shared'].includes(sort)) return;
     this.setData({ sorts: { ...this.data.sorts, [board]: sort } }); this.renderNotes();
   },
   async onFavorites() { await this.loadFavorites(); },

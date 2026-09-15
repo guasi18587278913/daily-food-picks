@@ -123,7 +123,7 @@ test('rising accounts are published as facts, deduplicated, and marked so seven 
   assert.equal((await store.get('dfp_results', `rising_published_${account.authorId}`)).snapshotId, snapshot.id);
   // Only the listed facts travel to the page: no follower history, judgments or internal keys.
   assert.deepEqual(Object.keys(snapshot.accounts[0]).sort(),
-    ['author', 'authorId', 'baselineAt', 'fans', 'fansBefore', 'fansDelta', 'notes', 'observedAt', 'spanHours']);
+    ['author', 'authorId', 'baselineAt', 'fans', 'fansBefore', 'fansDelta', 'gainRate', 'notes', 'observedAt', 'spanHours']);
   assert.equal(publicAccount({ authorId: '7'.repeat(24) }), null);
   assert.equal(publicAccount({ authorId: 'short', fansDelta: 1 }), null);
 });

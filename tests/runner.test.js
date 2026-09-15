@@ -30,7 +30,7 @@ test('repeated ticks resume an empty completed round without buying search pages
 test('a limited tick resumes detail and judgment later, and publishes real cooking evidence', async () => {
   const store = new MemoryStore(); let detailCalls = 0; let judgments = 0;
   const note = { noteId: id, authorId: '000000000000000000000002', title: '蒸蛋', desc: '加水蒸十分钟',
-    author: '作者', type: 'normal', publishedAt: new Date(NOW - 2 * 86400000).toISOString(), likes: 2000, collected: 2500,
+    author: '作者', type: 'normal', publishedAt: new Date(NOW - 2 * 86400000).toISOString(), likes: 2000, comments: 250, shared: 100,
     fans: null, bodyComplete: false };
   const makeProvider = () => ({ sent: 0, async request(kind) {
     if (this.sent >= 5) { const e = new Error('TICK_LIMIT'); e.code = 'TICK_LIMIT'; throw e; }

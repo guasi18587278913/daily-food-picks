@@ -12,7 +12,7 @@ const base = { enabled: true, freeAiConfirmed: true, dailyCalls: 250, dailyMicro
   validationCalls: 20, validationMicroUsd: 200000, maxAiCallsPerRound: 20, discoveryMode: 'adaptive',
   vision: { enabled: false, dailyMicroCny: 500000, roundCalls: 3, validationCalls: 6, validationMicroCny: 200000 } };
 const raw = (n, patch = {}) => ({ id: id(n), user: { userid: id(100 + n), nickname: `作者${n}` }, type: 'normal',
-  time: (NOW - 2 * DAY) / 1000, liked_count: 600, collected_count: 900, title: '蒸蛋', desc: '鸡蛋2个，加水搅匀，蒸十分钟。', ...patch });
+  time: (NOW - 2 * DAY) / 1000, liked_count: 600, collected_count: 900, comments_count: 60, shared_count: 40, title: '蒸蛋', desc: '鸡蛋2个，加水搅匀，蒸十分钟。', ...patch });
 const response = data => Response.json({ code: 200, data: { success: true, code: 0, data } });
 async function seed(store, entries) {
   for (const e of entries) {
@@ -55,7 +55,7 @@ test('a regular round re-checks stale authors after its candidates and publishes
   // The selected work's own author, then the two stale tracked authors; the author seen two hours ago is left alone.
   assert.deepEqual(userCalls, [id(101), id(201), id(202)]);
   const snapshot = await readSnapshot(store, result.snapshotId);
-  assert.equal(snapshot.boards.saves, 1); assert.equal(snapshot.boards.rising, 1);
+  assert.equal(snapshot.boards.engage, 1); assert.equal(snapshot.boards.rising, 1);
   assert.deepEqual(snapshot.accounts.map(a => [a.authorId, a.author, a.fansBefore, a.fans, a.fansDelta, a.spanHours]), [[id(201), '涨粉号', 4000, 5300, 1300, 72]]);
   const round = await store.get('dfp_rounds', '20260912-0900');
   assert.deepEqual(round.coverage.rising, { rechecked: 2, queued: 2, published: 1 });
