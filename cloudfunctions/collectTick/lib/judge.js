@@ -55,8 +55,9 @@ function modelErrorCategory(error) {
     ? 'timeout' : status === 401 || status === 403 ? 'authorization' : status === 429 ? 'rate_limit' : 'service';
   return { category, status };
 }
+// A retry only happens when its pause plus a full model call (35 s) still fit before the caller's deadline.
 async function judgeNote(note, generate, { sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
-  retryDelaysMs = RATE_LIMIT_RETRY_DELAYS_MS } = {}) {
+  retryDelaysMs = RATE_LIMIT_RETRY_DELAYS_MS, clock = Date.now, deadline = Infinity, callTimeoutMs = 35000 } = {}) {
   if (!needsTextModel(note)) {
     return { verdict: 'uncertain', evidence: '', reason: 'incomplete_body' };
   }
@@ -69,10 +70,11 @@ async function judgeNote(note, generate, { sleep = ms => new Promise(resolve => 
     { role: 'user', content: JSON.stringify({ type: note.type, title: note.title, desc: note.desc }) }
   ];
   for (let attempt = 1; ; attempt++) {
-    try { return { ...parseJudgment(await generate(messages), note), inputHash: digest([note.type, note.title, note.desc]) }; }
+    try { return { ...parseJudgment(await generate(messages), note), inputHash: digest([note.type, note.title, note.desc]), attempts: attempt }; }
     catch (error) {
       const { category, status } = modelErrorCategory(error);
-      if (category === 'rate_limit' && attempt <= retryDelaysMs.length) { await sleep(retryDelaysMs[attempt - 1]); continue; }
+      const delay = retryDelaysMs[attempt - 1];
+      if (category === 'rate_limit' && delay !== undefined && clock() + delay + callTimeoutMs < deadline) { await sleep(delay); continue; }
       // Persist categories, HTTP status and attempt counts only; SDK errors can contain credentials or input text.
       return { verdict: 'error', evidence: '', reason: category === 'rate_limit' ? 'model_rate_limited' : 'model_unavailable',
         diagnostics: { category, httpStatus: status, attempts: attempt } };

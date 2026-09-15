@@ -45,16 +45,21 @@ test('when every host stalls the failure names the timeout and carries per-host 
 }));
 
 test('a rejected primary response is retried elsewhere, but an oversized or corrupt file is not', async () => sandbox(async root => {
-  let downloads = 0;
+  let downloads = 0; const signals = [];
   const result = await extractFrames(media, { tempRoot: root, execFile: decoder,
-    fetcher: async () => { downloads++; return downloads === 1 ? new Response('', { status: 403 }) : new Response(movie); } });
+    fetcher: async (url, options) => { downloads++; signals.push(options.signal); return downloads === 1 ? new Response('', { status: 403 }) : new Response(movie); } });
   assert.equal(result.downloadAttempts[0].code, 'VIDEO_DOWNLOAD_FAILED'); assert.equal(downloads, 2);
+  // The unread 403 response is abandoned explicitly so its connection does not linger; the good one is left alone.
+  assert.deepEqual(signals.map(s => s.aborted), [true, false]);
   downloads = 0;
-  await assert.rejects(() => extractFrames(media, { tempRoot: root, fetcher: async () => { downloads++; return new Response('not an mp4 video'); } }), /VIDEO_INVALID_CONTAINER/);
-  assert.equal(downloads, 1);
-  downloads = 0;
-  await assert.rejects(() => extractFrames(media, { tempRoot: root, fetcher: async () => { downloads++; return new Response(movie, { headers: { 'content-length': String(64 * 1024 * 1024) } }); } }), /VIDEO_TOO_LARGE/);
-  assert.equal(downloads, 1);
+  const corrupt = await extractFrames(media, { tempRoot: root, fetcher: async () => { downloads++; return new Response('not an mp4 video'); } }).then(() => assert.fail('expected failure'), e => e);
+  assert.equal(corrupt.code, 'VIDEO_INVALID_CONTAINER'); assert.equal(downloads, 1);
+  assert.deepEqual(corrupt.downloadAttempts.map(a => a.code), ['VIDEO_INVALID_CONTAINER']);
+  downloads = 0; signals.length = 0;
+  const large = await extractFrames(media, { tempRoot: root, fetcher: async (url, options) => { downloads++; signals.push(options.signal); return new Response(movie, { headers: { 'content-length': String(64 * 1024 * 1024) } }); } }).then(() => assert.fail('expected failure'), e => e);
+  assert.equal(large.code, 'VIDEO_TOO_LARGE'); assert.equal(downloads, 1);
+  assert.deepEqual(large.downloadAttempts.map(a => [a.host, a.code]), [['sns-video-v11.xhscdn.com', 'VIDEO_TOO_LARGE']]);
+  assert.equal(signals[0].aborted, true);
   assert.deepEqual(await fs.readdir(root), []);
 }));
 
@@ -86,9 +91,10 @@ test('a real HTTP body that stops sending is abandoned by the stall timer and th
   try {
     const fetcher = (url, options) => fetch(`http://127.0.0.1:${port}${new URL(url).hostname.startsWith('sns-video') ? '/stall' : '/ok'}`, options);
     const started = Date.now();
-    const result = await extractFrames(media, { tempRoot: root, fetcher, execFile: decoder, stallTimeoutMs: 200 });
-    assert.deepEqual(result.downloadAttempts.map(a => [a.code, a.bytes]), [['VIDEO_DOWNLOAD_TIMEOUT', 20], ['ok', movie.length]]);
-    assert.ok(Date.now() - started < 5000);
+    const result = await extractFrames(media, { tempRoot: root, fetcher, execFile: decoder, stallTimeoutMs: 1000 });
+    assert.deepEqual(result.downloadAttempts.map(a => a.code), ['VIDEO_DOWNLOAD_TIMEOUT', 'ok']);
+    assert.ok(result.downloadAttempts[0].bytes < movie.length); assert.equal(result.downloadAttempts[1].bytes, movie.length);
+    assert.ok(Date.now() - started < 8000);
     assert.equal(requests, 2);
   } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
 }));

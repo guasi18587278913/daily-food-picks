@@ -17,8 +17,19 @@ test('rate-limited calls are retried with bounded pauses and then succeed withou
   let calls = 0; const pauses = [];
   const generate = async () => { calls++; if (calls < 3) throw rateLimited(); return good; };
   const result = await judgeNote(note, generate, { sleep: async ms => { pauses.push(ms); } });
-  assert.equal(result.verdict, 'cooking'); assert.equal(calls, 3);
+  assert.equal(result.verdict, 'cooking'); assert.equal(calls, 3); assert.equal(result.attempts, 3);
   assert.deepEqual(pauses, [...RATE_LIMIT_RETRY_DELAYS_MS]);
+});
+
+test('no retry starts when the pause plus a full call would cross the tick deadline', async () => {
+  let calls = 0; let slept = false; let time = 1000000;
+  const generate = async () => { calls++; throw rateLimited(); };
+  const result = await judgeNote(note, generate, { sleep: async () => { slept = true; }, clock: () => time, deadline: time + 36000 });
+  assert.equal(result.verdict, 'error'); assert.equal(result.reason, 'model_rate_limited'); assert.equal(calls, 1); assert.equal(slept, false);
+  assert.equal(result.diagnostics.attempts, 1);
+  // 38 s of room fits the first pause (1.5 s) plus a call, but not the second pause (3.5 s) plus a call.
+  const roomy = await judgeNote(note, generate, { sleep: async () => { slept = true; }, clock: () => time, deadline: time + 38000 });
+  assert.equal(roomy.diagnostics.attempts, 2); assert.equal(slept, true);
 });
 
 test('persistent rate limiting gives up after the retry budget with attempt counts and no text in diagnostics', async () => {

@@ -38,6 +38,7 @@ async function downloadOnce(url, file, fetcher, timeoutMs, progress, { now, stal
   const arm = ms => { clearTimeout(timer); timer = setTimeout(() => controller.abort(new DOMException('stalled', 'TimeoutError')), ms); };
   const remaining = () => Math.max(1, timeoutMs - (now() - progress.startedAt));
   arm(Math.min(stallTimeoutMs, remaining()));
+  let completed = false;
   try {
     const response = await fetcher(url, { redirect: 'error', signal: controller.signal });
     if (!response.ok || !response.body) fail('VIDEO_DOWNLOAD_FAILED');
@@ -49,7 +50,12 @@ async function downloadOnce(url, file, fetcher, timeoutMs, progress, { now, stal
         arm(Math.min(stallTimeoutMs, remaining())); yield chunk;
       }
     }, createWriteStream(file, { mode: 0o600 }));
-  } finally { clearTimeout(timer); }
+    completed = true;
+  } finally {
+    clearTimeout(timer);
+    // A rejected or oversized response is never read to the end; abort so the connection does not linger.
+    if (!completed) controller.abort(new DOMException('abandoned', 'AbortError'));
+  }
 }
 async function download(media, file, fetcher, { now = Date.now, stallTimeoutMs = STALL_TIMEOUT_MS } = {}) {
   const urls = validateMedia(media);
@@ -62,19 +68,21 @@ async function download(media, file, fetcher, { now = Date.now, stallTimeoutMs =
     const host = new URL(url).hostname;
     try {
       await downloadOnce(url, file, fetcher, Math.min(ATTEMPT_TIMEOUT_MS, remaining), progress, { now, stallTimeoutMs });
-      attempts.push({ host, code: 'ok', bytes: progress.bytes, ms: now() - progress.startedAt });
       if (progress.bytes < 12) fail('VIDEO_INVALID_CONTAINER');
       const handle = await fs.open(file, 'r');
       try {
         const header = Buffer.alloc(12); await handle.read(header, 0, 12, 0);
         if (header.toString('ascii', 4, 8) !== 'ftyp') fail('VIDEO_INVALID_CONTAINER');
       } finally { await handle.close(); }
+      attempts.push({ host, code: 'ok', bytes: progress.bytes, ms: now() - progress.startedAt });
       return { bytes: progress.bytes, attempts };
     } catch (e) {
-      if (typeof e.code === 'string' && e.code.startsWith('VIDEO_') && !['VIDEO_DOWNLOAD_FAILED'].includes(e.code)) throw Object.assign(e, { downloadAttempts: attempts });
-      const code = ['TimeoutError', 'AbortError'].includes(e.name) ? 'VIDEO_DOWNLOAD_TIMEOUT' : 'VIDEO_DOWNLOAD_FAILED';
+      const final = typeof e.code === 'string' && e.code.startsWith('VIDEO_') && e.code !== 'VIDEO_DOWNLOAD_FAILED';
+      const code = final ? e.code : ['TimeoutError', 'AbortError'].includes(e.name) ? 'VIDEO_DOWNLOAD_TIMEOUT' : 'VIDEO_DOWNLOAD_FAILED';
       attempts.push({ host, code, bytes: progress.bytes, ms: now() - progress.startedAt });
       await fs.rm(file, { force: true });
+      // An oversized or corrupt file is the video's fault, not the host's: no alternate host is tried.
+      if (final) throw Object.assign(e, { downloadAttempts: attempts });
     }
   }
   fail(attempts.some(a => a.code === 'VIDEO_DOWNLOAD_TIMEOUT') ? 'VIDEO_DOWNLOAD_TIMEOUT' : 'VIDEO_DOWNLOAD_FAILED', { downloadAttempts: attempts });

@@ -147,6 +147,7 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
     coverage.keywords = progress.discovery.jobs.filter(j => j.kind === 'search' && j.status === 'complete').map(j => j.params.keyword);
     coverage.notice = '从平台热点、话题、作者及关键词等入口按额度筛选，并非全站完整榜单。';
     coverage.judgmentCacheHits = progress.judgmentCacheHits || 0;
+    coverage.textRequests = { judgments: progress.aiCalls || 0, retries: progress.aiRetries || 0 };
     coverage.vision = { checked: progress.visionChecked || 0, cacheHits: progress.visionCacheHits || 0 };
   }
   // A rejected query does not erase completed searches. Total provider failure or an unavailable
@@ -311,8 +312,10 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
             row.stage = 'judging'; row.textCallReserved = callsModel;
             if (callsModel) progress.aiCalls++;
             await save(true);
-            row.note.judgment = await judgeNote(row.note, generate);
+            row.note.judgment = await judgeNote(row.note, generate, { clock, deadline });
             row.textCallReserved = false;
+            // Every rate-limit retry is one more free-channel request beyond the reserved judgment; the ledger keeps the count.
+            progress.aiRetries = (progress.aiRetries || 0) + Math.max(0, (row.note.judgment.attempts ?? row.note.judgment.diagnostics?.attempts ?? 1) - 1);
             if (callsModel) progress.textFailureStreak = row.note.judgment.verdict === 'error' ? (progress.textFailureStreak || 0) + 1 : 0;
             if (adaptive) {
               const warning = await cacheJudgment(store, lease, row.note, 'text', row.note.judgment, clock());
