@@ -11,6 +11,24 @@ const KEYWORDS = require('../config/keywords.json');
 const yieldsNotes = kind => endpoint(kind)?.yields === 'notes';
 const sourceKey = (kind, params) => `source_${digest([kind, Object.fromEntries(Object.entries(params).sort())]).slice(0, 48)}`;
 const foodHint = text => POLICY.foodHints.some(h => String(text || '').toLowerCase().includes(h.toLowerCase()));
+// Search variants a keyword is tried with. In the audited 2026-09-14/15 rounds image notes never reached the 24-hour
+// today threshold (0 of 80 results), so the 06:00 sweep searches videos only. Regular rounds add a collect-sorted
+// video variant: saved-to-liked ratio separated cooking videos (median 0.84) from the rest (about 0.25).
+const SWEEP_VARIANTS = Object.freeze([{ note_type: '视频笔记' }]);
+const REGULAR_VARIANTS = Object.freeze([{ note_type: '视频笔记' }, { note_type: '普通笔记' },
+  { note_type: '视频笔记', sort_type: 'collect_descending' }]);
+const searchVariants = round => round.kind === 'sweep' ? SWEEP_VARIANTS : REGULAR_VARIANTS;
+// Keywords that produced today picks in audited sweeps come first; the rest of the list keeps rotating daily.
+function sweepKeywords() {
+  const priority = KEYWORDS.dailySweep.priorityKeywords || [];
+  return [...new Set([...priority, ...KEYWORDS.dailySweep.keywords])];
+}
+// The sweep only publishes today picks; author collections and image-note searches have not produced any.
+function admitsSource(round, seed) {
+  if (round.kind !== 'sweep') return true;
+  if (['faved', 'user'].includes(seed.kind)) return false;
+  return !(seed.kind === 'search' && seed.params?.note_type === '普通笔记');
+}
 function admitsCandidate(round, note) {
   const boards = eligibleBoards(note, round.scheduledAt, { allowUnknownFans: true });
   return round.kind === 'sweep' ? boards.includes('today') : boards.length > 0;
@@ -23,18 +41,20 @@ function jobFor(seed, round) {
   let params = { ...seed.params };
   if (seed.kind === 'topic' && round.kind === 'sweep' && ['candidate-reserve-v1', 'candidate-reserve-v2'].includes(round.discoveryAllocation)) params.sort = 'time';
   if (seed.kind === 'search') params = { keyword: seed.params.keyword, note_type: seed.params.note_type || '不限',
-    page: 1, sort_type: 'popularity_descending', time_filter: round.kind === 'sweep' ? '一天内' : '一周内',
-    source: 'explore_feed', ai_mode: 0 };
+    page: 1, sort_type: seed.params.sort_type === 'collect_descending' ? 'collect_descending' : 'popularity_descending',
+    time_filter: round.kind === 'sweep' ? '一天内' : '一周内', source: 'explore_feed', ai_mode: 0 };
   validateParams(seed.kind, params);
   return { id: digest([seed.kind, params]).slice(0, 48), kind: seed.kind, params,
     sourceKey: seed.key, label: seed.label, origin: seed.origin, status: 'pending' };
 }
 function rankSources(rows, statistics, now, explore) {
   const eligible = rows.filter(s => s.expiresAt > now && !(statistics[s.key]?.cooldownUntil > now));
+  // Weak priors: an untried source ranks below any source that has produced candidates and above one that returned
+  // nothing, so exploit rounds prefer proven sources; explore rounds still try the least recently used first.
   const quality = s => {
     const x = statistics[s.key] || {};
-    return ((x.accepted || 0) + 1) / ((x.resolved || 0) + 2)
-      * (((x.candidates || 0) + 1) / ((x.requests || 0) + 1));
+    return ((x.accepted || 0) + 0.25) / ((x.resolved || 0) + 2)
+      * (((x.candidates || 0) + 0.5) / ((x.requests || 0) + 1));
   };
   return eligible.sort((a, b) => explore
     ? (statistics[a.key]?.lastUsedAt || 0) - (statistics[b.key]?.lastUsedAt || 0) || a.key.localeCompare(b.key)
@@ -70,13 +90,8 @@ class Discovery {
     const explore = (day + Math.max(0, slot)) % 4 === 0;
     const meta = source(explore ? 'inspiration' : 'hot', explore ? { cursor: '', tab: 0, source: 'creator_center' } : { cursor: '' },
       explore ? '创作主题' : '创作热点', explore ? 'inspiration' : 'hot', this.clock());
-    const words = this.round.kind === 'sweep' ? KEYWORDS.dailySweep.keywords
-      : KEYWORDS.groups[(day * 3 + Math.max(0, slot - 1)) % KEYWORDS.groups.length];
-    const rotation = (day * 7 + Math.max(0, slot) * 3) % words.length;
-    const fixed = Array.from({ length: this.round.kind === 'sweep' ? 12 : 4 }, (_, i) => source('search',
-      { keyword: words[(rotation + Math.floor(i / 2)) % words.length], note_type: i % 2 ? '普通笔记' : '视频笔记' },
-      words[(rotation + Math.floor(i / 2)) % words.length], 'keyword', this.clock()));
-    const ranked = rankSources([...this.sources.values()], stats, this.clock(), explore).slice(0, 12);
+    const fixed = this.fixedSearchSeeds(day, slot);
+    const ranked = rankSources([...this.sources.values()].filter(s => admitsSource(this.round, s)), stats, this.clock(), explore).slice(0, 12);
     // A real post query comes before metadata, whose retries could otherwise consume the entire discovery budget.
     // Deliberately narrower than yieldsNotes: faved must pass a publicity check before it can be issued.
     const firstContent = !explore && ranked.find(s => ['search', 'topic', 'author'].includes(s.kind)) || fixed[0];
@@ -85,6 +100,18 @@ class Discovery {
       successfulMetadata: 0, cacheHits: 0, relatedCandidates: 0, candidateCount: this.ids.size,
       pendingCandidateCount: this.pendingIds.size, stopReason: null };
     for (const seed of seeds) { await this.remember(seed); this.enqueue(seed); }
+  }
+  fixedSearchSeeds(day, slot) {
+    const sweep = this.round.kind === 'sweep';
+    const words = sweep ? sweepKeywords() : KEYWORDS.groups[(day * 3 + Math.max(0, slot - 1)) % KEYWORDS.groups.length];
+    const rotation = (day * 7 + Math.max(0, slot) * 3) % words.length;
+    const priority = sweep ? (KEYWORDS.dailySweep.priorityKeywords || []).slice(0, 12) : [];
+    const rotating = words.filter(w => !priority.includes(w));
+    const count = sweep ? 12 - priority.length : 2;
+    const chosen = [...new Set([...priority, ...Array.from({ length: rotating.length ? count : 0 },
+      (_, i) => rotating[(rotation + i) % rotating.length])])];
+    return chosen.flatMap(keyword => searchVariants(this.round).map(variant =>
+      source('search', { keyword, ...variant }, keyword, 'keyword', this.clock())));
   }
   enqueue(seed, next = false) {
     const state = this.progress.discovery;
@@ -212,10 +239,10 @@ class Discovery {
     }
     if (dynamic && state.index >= state.jobs.length && candidateCount < target) {
       // Continue unused, type-specific searches only when the first source batch was too sparse.
-      const words = this.round.kind === 'sweep' ? KEYWORDS.dailySweep.keywords : [...new Set(KEYWORDS.groups.flat())];
-      for (const word of words) for (const note_type of ['视频笔记', '普通笔记']) {
+      const words = this.round.kind === 'sweep' ? sweepKeywords() : [...new Set(KEYWORDS.groups.flat())];
+      for (const word of words) for (const variant of searchVariants(this.round)) {
         if (state.jobs.length >= POLICY.maxTasks) break;
-        const seed = source('search', { keyword: word, note_type }, word, 'keyword', this.clock());
+        const seed = source('search', { keyword: word, ...variant }, word, 'keyword', this.clock());
         const previousSize = state.jobs.length;
         this.enqueue(seed);
         if (state.jobs.length > previousSize) await this.remember(seed);
@@ -303,4 +330,4 @@ async function finalizeStatistics({ store, lease, round, progress, rows, now }) 
     await tx.put('dfp_rounds', round.id, { ...current, discoveryStatsApplied: true });
   });
 }
-module.exports = { Discovery, admitsCandidate, foodHint, source, sourceKey, jobFor, rankSources, finalizeStatistics, POLICY };
+module.exports = { Discovery, admitsCandidate, admitsSource, foodHint, source, sourceKey, jobFor, rankSources, searchVariants, sweepKeywords, finalizeStatistics, POLICY };

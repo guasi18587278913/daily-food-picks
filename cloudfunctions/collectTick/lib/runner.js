@@ -31,15 +31,23 @@ function admitsCandidate(round, note) {
   const boards = eligibleBoards(note, round.scheduledAt, { allowUnknownFans: true });
   return round.kind === 'sweep' ? boards.includes('today') : boards.length > 0;
 }
+// The saved-to-liked ratio on a search page is free evidence: in the audited 2026-09-14/15 rounds cooking notes had a
+// median ratio of 0.79 (first quartile 0.53) while uncertain and non-cooking notes sat near 0.25.
+function collectSignal(note) {
+  if (!Number.isSafeInteger(note.collected) || !Number.isSafeInteger(note.likes) || note.likes <= 0) return 0;
+  const ratio = note.collected / note.likes;
+  return ratio >= 0.5 ? 2 : ratio >= 0.3 ? 1 : 0;
+}
 function prioritizeRecipeClues(rows) {
   const score = row => {
     const body = String(row.note.desc || '').replace(/#[^#]*#/g, ' ');
     return (/食材|用料|配方|步骤|制作方法/.test(body) ? 2 : 0)
       + (/\d+(?:\.\d+)?\s*(?:kg|ml|g|克|毫升|个|勺)/i.test(body) ? 1 : 0)
-      + (/教程|做法|自制|怎么做|这样做/.test(row.note.title || '') ? 1 : 0);
+      + (/教程|做法|自制|怎么做|这样做/.test(row.note.title || '') ? 1 : 0)
+      + collectSignal(row.note);
   };
   const ordered = [];
-  for (let level = 4; level >= 0; level--) {
+  for (let level = 6; level >= 0; level--) {
     const group = rows.filter(row => score(row) === level)
       .sort((a, b) => (b.note.likes ?? -1) - (a.note.likes ?? -1) || a.note.noteId.localeCompare(b.note.noteId));
     while (group.length) { ordered.push(group.shift()); if (group.length) ordered.push(group.pop()); }

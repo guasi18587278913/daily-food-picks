@@ -29,7 +29,7 @@ const ENDPOINTS = Object.freeze({
     params: ['keyword', 'page', 'sort_type', 'time_filter', 'note_type', 'source', 'ai_mode', 'search_id', 'search_session_id'],
     accepts: params => typeof params.keyword === 'string' && params.keyword.trim() !== '' && params.keyword.length <= 60
       && Number.isInteger(params.page) && params.page >= 1 && params.page <= 20
-      && ['popularity_descending', 'time_descending'].includes(params.sort_type)
+      && ['popularity_descending', 'time_descending', 'collect_descending'].includes(params.sort_type)
       && ['一天内', '一周内'].includes(params.time_filter)
       && ['视频笔记', '普通笔记', '不限'].includes(params.note_type),
     rows: inner => Array.isArray(inner.items) ? inner.items.filter(x => x?.note).map(x => x.note) : null }),
