@@ -40,7 +40,11 @@ function card(note, board, sort, favorite) {
     displayTitle: note.title || '未提供标题 · 点开查看内容', big: formatMetric(big), unit, comparison,
     publishedLabel: formatTime(note.publishedAt), typeLabel: note.type === 'video' ? '视频' : '图文', favorite };
 }
-/** @param {RisingAccount} account */
+/**
+ * An account card states what the collector observed about the account. Its recent works are evidence, not entries:
+ * they may never have been published, so they are text rather than links into the note detail page.
+ * @param {RisingAccount} account
+ */
 function accountCard(account) {
   const hours = typeof account.spanHours === 'number' && Number.isFinite(account.spanHours) ? account.spanHours : null;
   const span = hours === null ? '观测跨度未知' : hours >= 48 ? `${Math.round(hours / 24)} 天内` : `${hours} 小时内`;

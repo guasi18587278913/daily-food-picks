@@ -100,7 +100,7 @@
             </view>
             <text class="account-meta">{{account.fansLabel}} · {{account.spanLabel}} · {{account.observedLabel}}</text>
             <view wx:if="{{account.notes.length}}" class="account-notes">
-              <view wx:for="{{account.notes}}" wx:key="noteId" wx:for-item="work" class="account-note" data-id="{{work.noteId}}" bindtap="onViewContent">
+              <view wx:for="{{account.notes}}" wx:key="noteId" wx:for-item="work" class="account-note">
                 <text class="account-note-title">{{work.title}}</text><text class="account-note-metric">{{work.metric}}</text>
               </view>
             </view>
