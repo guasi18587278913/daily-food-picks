@@ -90,3 +90,20 @@ test('only the food track has a visual judge, and an unknown track never silentl
   assert.equal(TRACKS[DEFAULT_TRACK].key, 'food');
   assert.deepEqual(TRACK_KEYS, ['food', 'fde']);
 });
+
+test('a paused track opens no rounds, and the one still collecting keeps its own approved day', () => {
+  const only = loadConfig({ ...ENV, DFP_ACTIVE_TRACKS: 'fde' });
+  assert.deepEqual(only.activeTracks, ['fde']);
+  const round = hour => scheduledRound(at(hour), only);
+  for (const hour of [TRACKS.food.sweepHour, ...TRACKS.food.regularHours]) assert.equal(round(hour), null, String(hour));
+  // Turning a track off never enlarges another: the FDE day is exactly what it was with both running.
+  const both = loadConfig(ENV);
+  for (const hour of [TRACKS.fde.sweepHour, ...TRACKS.fde.regularHours]) {
+    assert.equal(round(hour).roundCalls, scheduledRound(at(hour), both).roundCalls, String(hour));
+    assert.equal(round(hour).track, 'fde');
+  }
+  assert.deepEqual(loadConfig(ENV).activeTracks, ['food', 'fde']);
+  // A list naming nothing we know is a mistake worth failing on, not a silent fall back to collecting everything.
+  assert.throws(() => loadConfig({ ...ENV, DFP_ACTIVE_TRACKS: 'nope' }), /INVALID_TRACK_CONFIG/);
+  assert.deepEqual(loadConfig({ ...ENV, DFP_ACTIVE_TRACKS: ' fde , fde ' }).activeTracks, ['fde']);
+});

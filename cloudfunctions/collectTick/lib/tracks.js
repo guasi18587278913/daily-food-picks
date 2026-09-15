@@ -62,6 +62,14 @@ const TRACKS = Object.freeze({
 });
 const TRACK_KEYS = Object.freeze(Object.keys(TRACKS));
 const DEFAULT_TRACK = 'food';
+// Which tracks collect. Absent, every track collects; listed, only those do. A track that is off keeps its published
+// rounds readable and its share of the day unspent — turning one off never enlarges another.
+function activeTracks(env = process.env) {
+  const raw = String(env.DFP_ACTIVE_TRACKS || '').split(',').map(x => x.trim()).filter(Boolean);
+  const chosen = raw.filter(key => Object.hasOwn(TRACKS, key));
+  if (raw.length && !chosen.length) throw Object.assign(Error('INVALID_TRACK_CONFIG'), { code: 'INVALID_TRACK_CONFIG' });
+  return Object.freeze(chosen.length ? [...new Set(chosen)] : [...TRACK_KEYS]);
+}
 
 // Own keys only: 'constructor' or '__proto__' must never resolve to a track.
 function track(key) {
@@ -76,4 +84,4 @@ function trackForHour(hour) {
 }
 const isSweepHour = (trackKey, hour) => track(trackKey)?.sweepHour === hour;
 
-module.exports = { TRACKS, TRACK_KEYS, DEFAULT_TRACK, track, trackForHour, isSweepHour };
+module.exports = { TRACKS, TRACK_KEYS, DEFAULT_TRACK, track, trackForHour, isSweepHour, activeTracks };

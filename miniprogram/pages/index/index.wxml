@@ -56,7 +56,8 @@
       <button wx:for="{{tracks}}" wx:key="key" class="track-tab {{track === item.key ? 'selected' : ''}}"
         data-track="{{item.key}}" bindtap="switchTrack" aria-label="切换到{{item.label}}">{{item.label}}</button>
     </view>
-    <view class="status-line"><view class="status-dot {{statusTone}}"></view><text>{{statusLabel}}</text><text class="status-schedule">{{scheduleLabel}}</text></view>
+    <view wx:if="{{pausedTrack}}" class="paused-note">这个赛道已暂停采集，下面是它最后一次更新的内容。</view>
+    <view class="status-line"><view class="status-dot {{statusTone}}"></view><text>{{statusLabel}}</text><text class="status-schedule">{{pausedTrack ? '暂停采集中' : scheduleLabel}}</text></view>
     <view class="view-bar">
       <view class="segment">
         <button class="segment-item {{mode !== 'favorites' ? 'selected' : ''}}" bindtap="onLatest"><text class="segment-label">选题台</text></button>

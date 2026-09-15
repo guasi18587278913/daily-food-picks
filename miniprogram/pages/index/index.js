@@ -4,6 +4,9 @@ const { createFavorites } = require('../../lib/favorites');
 const { boards, card, formatTime } = require('../../lib/view');
 /** @type {Record<string,string>} */
 const SCHEDULE_LABEL = { food: '每日 06 / 09 / 12 / 20 点更新', fde: '每日 07 / 10 / 13 / 21 点更新' };
+// Niches the collector is not running right now. Their boards stay readable; the page says so instead of implying
+// that an old round is today's. Kept beside the schedule labels so both move together when a niche is switched back on.
+const PAUSED_TRACKS = ['food'];
 const STORAGE_KEY = 'food-picks:favorites:v2';
 const LEGACY_STORAGE_KEY = 'food-picks:favorites:v1';
 
@@ -12,8 +15,8 @@ Page({
     // access: checking | ready | needsCode | suspended | blocked — decided by the server, never guessed here.
     access: 'checking', role: '', codeInput: '', redeeming: false,
     // Two niches monitored by the same rules; the tab only decides which one's rounds are being read.
-    track: 'food', tracks: [{ key: 'food', label: '深夜食堂' }, { key: 'fde', label: 'AI 工程' }],
-    scheduleLabel: '每日 06 / 09 / 12 / 20 点更新',
+    track: 'fde', tracks: [{ key: 'fde', label: 'AI 工程' }, { key: 'food', label: '深夜食堂' }],
+    scheduleLabel: SCHEDULE_LABEL.fde, pausedTrack: PAUSED_TRACKS.includes('fde'),
     mode: 'round', query: '', loading: true, loadingMore: false, message: '',
     statusLabel: '正在查看更新', statusTone: '', roundLabel: '每天更新，给创作找点新意', updatedLabel: '',
     partialReason: '', coverageNotice: '基于当轮关键词发现选题，未覆盖小红书全部内容。',
@@ -183,7 +186,7 @@ Page({
     this._requestId++; this._statusRequestId++;
     this._notes = []; this._accounts = [];
     this._currentRoundId = null; this._latestId = null; this._newestId = null; this._roundCursor = null;
-    this.setData({ track, scheduleLabel: SCHEDULE_LABEL[track], mode: 'round', query: '', loading: true, loadingMore: false, message: '', newAvailable: false,
+    this.setData({ track, scheduleLabel: SCHEDULE_LABEL[track], pausedTrack: PAUSED_TRACKS.includes(track), mode: 'round', query: '', loading: true, loadingMore: false, message: '', newAvailable: false,
       total: 0, entries: 0, nextCursor: null, rounds: [], roundIndex: 0, olderRounds: false,
       partialReason: '', statusLabel: '正在查看更新', statusTone: '', updatedLabel: '',
       boardViews: boards([], this.data.sorts, () => false, []) });

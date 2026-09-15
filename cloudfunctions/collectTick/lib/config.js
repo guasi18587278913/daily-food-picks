@@ -2,7 +2,7 @@
 
 const { shanghaiDay, PRICE_MICRO_USD } = require('./budget');
 const { timingSafeEqual } = require('node:crypto');
-const { TRACKS, TRACK_KEYS, DEFAULT_TRACK, track, trackForHour } = require('./tracks');
+const { TRACKS, TRACK_KEYS, DEFAULT_TRACK, track, trackForHour, activeTracks } = require('./tracks');
 
 // The food track's own hours, kept as named constants because the supplement and validation rules are written against
 // them. Every track's hours live in tracks.js; these are the ones a manually scheduled round has to avoid.
@@ -89,6 +89,7 @@ function loadConfig(env = process.env) {
     maxAiCallsPerRound: 20, maxAiOutputTokens: 1024, maxAiInputChars: 12000,
     captureCallerForSetup: env.DFP_CAPTURE_CALLER_FOR_SETUP === 'true'
   };
+  config.activeTracks = activeTracks(env);
   config.discoveryMode = env.DFP_DISCOVERY_MODE || 'legacy';
   if (!['legacy', 'adaptive'].includes(config.discoveryMode)) throw error('INVALID_DISCOVERY_CONFIG');
   config.vision = { enabled: env.DFP_VISION_ENABLED === 'true',
@@ -142,13 +143,17 @@ function scheduledRound(now, config) {
   if (Number.isFinite(extra) && config.supplementCalls && now >= extra && now < extra + REGULAR_WINDOW_MINUTES * 60000) {
     start = extra; supplement = true;
   } else if (Number.isFinite(v) && now >= v && now < v + REGULAR_WINDOW_MINUTES * 60000) { start = v; validation = true; }
-  else if (trackForHour(nowHour)?.sweepHour === nowHour && config.sweepCalls) {
-    if (nowMinute >= SWEEP_WINDOW_MINUTES) return null;
-    start = Date.parse(`${day}T${pad(nowHour)}:00:00+08:00`);
-    kind = 'sweep';
-    windowMinutes = SWEEP_WINDOW_MINUTES;
-  } else {
-    if (!trackForHour(nowHour)?.regularHours.includes(nowHour) || nowMinute >= REGULAR_WINDOW_MINUTES) return null;
+  else {
+    // An hour belongs to one track. A track that is not collecting opens no round, and the timer's wake-up costs
+    // nothing: the function simply reports that it is outside a window.
+    const active = Array.isArray(config.activeTracks) ? config.activeTracks : TRACK_KEYS;
+    const owner = trackForHour(nowHour);
+    if (!owner || !active.includes(owner.key)) return null;
+    if (owner.sweepHour === nowHour && config.sweepCalls) {
+      if (nowMinute >= SWEEP_WINDOW_MINUTES) return null;
+      kind = 'sweep';
+      windowMinutes = SWEEP_WINDOW_MINUTES;
+    } else if (!owner.regularHours.includes(nowHour) || nowMinute >= REGULAR_WINDOW_MINUTES) return null;
     start = Date.parse(`${day}T${pad(nowHour)}:00:00+08:00`);
   }
   const d = new Date(start + 8 * 3600000);
