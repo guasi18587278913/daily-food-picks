@@ -1,6 +1,6 @@
 'use strict';
 const { ensureAuthorProfile } = require('./author-profiles');
-const { recordFansObservation, selectRecheck, risingAccounts } = require('./authors');
+const { recordFansObservation, markRecheckAttempt, selectRecheck, risingAccounts } = require('./authors');
 
 const { randomUUID } = require('node:crypto');
 const { claimLease, releaseLease, assertLease, validatePrice } = require('./budget');
@@ -277,6 +277,8 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           }
           if ((progress.recheckIndex || 0) < progress.recheckQueue.length && clock() < round.closesAt - 30000) {
             const authorId = progress.recheckQueue[progress.recheckIndex];
+            // Recorded before the request: an account that answers nothing must not lead the queue again tomorrow.
+            await markRecheckAttempt(store, lease, authorId, clock());
             try {
               const result = await provider.request('user', { user_id: authorId }, { purpose: 'inspection', forceFresh: true });
               await recordFansObservation(store, lease, { authorId, fans: result.fans, at: result.capturedAt ?? result.fetchedAt }, clock());

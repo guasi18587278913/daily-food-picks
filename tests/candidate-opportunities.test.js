@@ -7,6 +7,7 @@ const { readSnapshot } = require('../cloudfunctions/collectTick/lib/publisher');
 const { MemoryStore, NOW, PRICE } = require('./helpers');
 const ID = n => n.toString(16).padStart(24, '0');
 const round = { kind: 'regular', scheduledAt: NOW };
+const SAVES_FROM_SEVENTEEN_CALLS = 6;
 const row = (n, extra = {}) => ({ note: { noteId: ID(n), authorId: ID(n + 100), type: 'video',
   title: '家常菜', desc: '', publishedAt: new Date(NOW - 2 * 86400000).toISOString(), likes: 500, fans: null, ...extra } });
 
@@ -57,6 +58,6 @@ test('the actual request budget leaves room for week inspection before the many 
   assert.equal((await store.get('dfp_budgets', '2026-09-12')).calls, 17);
   assert.equal(result.status, 'partial');
   const snapshot = await readSnapshot(store, result.snapshotId);
-  // Saves candidates no longer fall to a follower cap, so whatever the remaining budget inspected is published with the week pick.
-  assert.equal(snapshot.boards.week, 1); assert.ok(snapshot.boards.saves >= 1 && snapshot.boards.saves < 45); assert.equal(snapshot.boards.rising, 0);
+  // Seventeen calls buy the week detail, then details for the saves candidates the ordering reached.
+  assert.deepEqual(snapshot.boards, { today: 0, week: 1, saves: SAVES_FROM_SEVENTEEN_CALLS, rising: 0 });
 });

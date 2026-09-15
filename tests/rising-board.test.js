@@ -4,7 +4,7 @@ const { MemoryStore, NOW, PRICE } = require('./helpers');
 const { runTick } = require('../cloudfunctions/collectTick/lib/runner');
 const { Provider } = require('../cloudfunctions/collectTick/lib/provider');
 const { claimLease, releaseLease } = require('../cloudfunctions/collectTick/lib/budget');
-const { recordFansObservation, INDEX_ID } = require('../cloudfunctions/collectTick/lib/authors');
+const { recordFansObservation, historyId, INDEX_ID } = require('../cloudfunctions/collectTick/lib/authors');
 const { readSnapshot } = require('../cloudfunctions/collectTick/lib/publisher');
 const id = n => n.toString(16).padStart(24, '0');
 const DAY = 86400000, HOUR = 3600000;
@@ -62,7 +62,9 @@ test('a regular round re-checks stale authors after its candidates and publishes
   // Re-checks are ordinary inspection requests on the same round ledger and stay inside its cap.
   assert.ok(round.calls <= 50);
   const index = await store.get('dfp_results', INDEX_ID);
-  assert.equal(index.authors[id(101)].fans, 100); assert.equal(index.authors[id(201)].gain, 1300);
+  assert.equal(index.authors[id(201)].gain, 1300);
+  // The selected work's own author is now tracked, with the follower count the lookup returned.
+  assert.deepEqual((await store.get('dfp_results', historyId(id(101)))).points.map(p => p.fans), [100]);
   assert.equal((await store.get('dfp_results', `rising_published_${id(201)}`)).snapshotId, snapshot.id);
 });
 

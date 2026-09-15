@@ -76,8 +76,8 @@
     <view wx:if="{{message}}" class="notice" role="alert"><text class="icon icon-sm icon-info"></text><text class="notice-text">{{message}}</text></view>
     <view wx:if="{{partialReason && partialReason !== message}}" class="notice"><text class="icon icon-sm icon-info"></text><text class="notice-text">{{partialReason}}</text></view>
 
-    <view wx:if="{{loading && !total}}" class="loading-state"><view class="loading-bar"></view><text>正在翻开选题本…</text></view>
-    <view wx:elif="{{!total && !missingFavorites.length}}" class="state-panel inline">
+    <view wx:if="{{loading && !entries}}" class="loading-state"><view class="loading-bar"></view><text>正在翻开选题本…</text></view>
+    <view wx:elif="{{!entries && !missingFavorites.length}}" class="state-panel inline">
       <view class="state-icon"><text class="icon state-glyph {{mode === 'favorites' ? 'icon-star' : mode === 'search' ? 'icon-search' : 'icon-bowl'}}"></text></view>
       <text class="state-title">{{mode === 'favorites' ? '留住下一道创作灵感' : mode === 'search' ? '这次还没有找到' : '等一轮新鲜灵感'}}</text>
       <text class="state-copy">{{mode === 'favorites' ? '看到想做的选题，点一下“收藏”。' : mode === 'search' ? '换个菜名或关键词试试，也可以继续查看更早内容。' : '有符合规则的选题时会出现在这里。每天 06:00、09:00、12:00、20:00 更新。'}}</text>
@@ -87,7 +87,7 @@
       <block wx:for="{{favoriteCards}}" wx:key="noteId"><template is="noteCard" data="{{note:item}}" /></block>
       <view wx:for="{{missingFavorites}}" wx:key="*this" class="missing-favorite"><text>这篇收藏暂时无法读取</text><button class="text-button" data-id="{{item}}" bindtap="onFavorite">取消收藏</button></view>
     </block>
-    <block wx:elif="{{total}}">
+    <block wx:elif="{{entries}}">
       <block wx:for="{{boardViews}}" wx:key="key" wx:for-item="board">
         <view wx:if="{{board.count}}" class="board">
           <view class="board-heading"><view class="board-mark {{board.key}}"></view><text class="board-name">{{board.name}}</text><text class="board-count">{{board.count}} {{board.key === 'rising' ? '个' : '篇'}}</text></view>

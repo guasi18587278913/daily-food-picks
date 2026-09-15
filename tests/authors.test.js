@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { MemoryStore, NOW } = require('./helpers');
 const { claimLease } = require('../cloudfunctions/collectTick/lib/budget');
-const { RULES, INDEX_ID, historyId, prunePoints, gainWithin, recordFansObservation, selectRecheck, risingAccounts, publishedRecently } = require('../cloudfunctions/collectTick/lib/authors');
+const { RULES, INDEX_ID, historyId, prunePoints, gainWithin, recordFansObservation, markRecheckAttempt, selectRecheck, risingAccounts, publishedRecently } = require('../cloudfunctions/collectTick/lib/authors');
 const id = n => n.toString(16).padStart(24, '0');
 const HOUR = 3600000, DAY = 86400000;
 async function setup() {
@@ -41,7 +41,8 @@ test('observations from any entry are recorded once per author with the index ke
   assert.deepEqual(doc.points, [{ at: NOW - 2 * DAY, fans: 4000 }, { at: NOW, fans: 5200 }]);
   assert.deepEqual(doc.recentNotes.map(n => [n.noteId, n.title]), [[id(50), '蒸蛋（更新）']]);
   const index = await store.get('dfp_results', INDEX_ID);
-  assert.deepEqual(index.authors[id(1)], { author: '小厨', lastObservedAt: NOW, fans: 5200, gain: 1200, spanMs: 2 * DAY });
+  // The index carries only what its readers need: the re-check queue and the rising lead.
+  assert.deepEqual(index.authors[id(1)], { lastAttemptAt: null, lastObservedAt: NOW, gain: 1200 });
 });
 
 test('the tracked set is bounded: the least recently observed author is evicted with its history', async () => {
@@ -63,6 +64,24 @@ test('re-checks pick the stalest tracked authors, skipping anyone observed withi
   assert.deepEqual(await selectRecheck(store, NOW, 2), [id(4), id(1)]);
   assert.deepEqual(await selectRecheck(store, NOW), [id(4), id(1), id(2)]);
   assert.deepEqual(await selectRecheck(new MemoryStore(), NOW), []);
+});
+
+test('an account that answers nothing goes to the back of the queue instead of leading it every round', async () => {
+  const { store, lease } = await setup();
+  await recordFansObservation(store, lease, { authorId: id(1), fans: 100, at: NOW - 3 * DAY }, NOW);
+  await recordFansObservation(store, lease, { authorId: id(2), fans: 100, at: NOW - 30 * HOUR }, NOW);
+  assert.deepEqual(await selectRecheck(store, NOW), [id(1), id(2)]);
+  assert.equal(await markRecheckAttempt(store, lease, id(1), NOW), true);
+  assert.deepEqual(await selectRecheck(store, NOW), [id(2)]);
+  // The attempt is remembered without inventing an observation, so no gain can come out of a failed re-check.
+  assert.deepEqual((await store.get('dfp_results', historyId(id(1)))).points, [{ at: NOW - 3 * DAY, fans: 100 }]);
+  // Once the attempt is old enough the account returns, now behind the author whose observation is older still.
+  assert.deepEqual(await selectRecheck(store, NOW + 21 * HOUR), [id(2), id(1)]);
+  assert.equal(await markRecheckAttempt(store, lease, id(999), NOW), false);
+  // A later successful observation keeps the attempt marker rather than resurrecting the old queue position.
+  const tomorrow = await claimLease(store, { owner: 'worker', now: NOW + 22 * HOUR });
+  await recordFansObservation(store, tomorrow, { authorId: id(1), fans: 200, at: NOW + 22 * HOUR }, NOW + 22 * HOUR);
+  assert.equal((await store.get('dfp_results', INDEX_ID)).authors[id(1)].lastAttemptAt, NOW);
 });
 
 test('rising accounts need a thousand-follower gain, are ranked by gain, capped and not repeated within seven days', async () => {

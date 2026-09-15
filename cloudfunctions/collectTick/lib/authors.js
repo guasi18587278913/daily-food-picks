@@ -7,6 +7,20 @@ const HOUR = 3600000, DAY = 86400000;
 const RULES = Object.freeze({ maxPoints: 40, keepDays: 14, maxTracked: 200, windowDays: 7, minimumGain: 1000,
   minimumSpanMs: 12 * HOUR, maxPerRound: 10, recheckPerRound: 8, recheckAfterMs: 20 * HOUR, recentNotes: 5, notesPerAccount: 3 });
 const INDEX_ID = 'fans_history_index_v1';
+// A re-check that answers nothing still moves the author to the back of the queue; otherwise a deleted account
+// would be picked first in every round and spend one request each time.
+async function markRecheckAttempt(store, lease, authorId, now) {
+  if (!ID.test(authorId || '') || !Number.isFinite(now)) return false;
+  return store.transaction(async tx => {
+    await assertLease(tx, lease, now);
+    const index = await tx.get('dfp_results', INDEX_ID);
+    const current = index?.authors?.[authorId];
+    if (!current) return false;
+    await tx.put('dfp_results', INDEX_ID, { ...index, authors: { ...index.authors,
+      [authorId]: { ...current, lastAttemptAt: now } }, updatedAt: now });
+    return true;
+  });
+}
 const historyId = authorId => `fans_${authorId}`;
 const publishedId = authorId => `rising_published_${authorId}`;
 const validAt = (at, now) => Number.isFinite(at) && at > 0 && at <= now;
@@ -49,8 +63,8 @@ async function recordFansObservation(store, lease, { authorId, author, fans, at,
       lastObservedAt: points[points.length - 1].at };
     await tx.put('dfp_results', historyId(authorId), doc);
     const growth = gainWithin(points, now);
-    authors[authorId] = { author: name, lastObservedAt: doc.lastObservedAt, fans: doc.points[doc.points.length - 1].fans,
-      gain: growth ? growth.gain : null, spanMs: growth ? growth.spanMs : null };
+    authors[authorId] = { lastAttemptAt: authors[authorId]?.lastAttemptAt ?? null,
+      lastObservedAt: doc.lastObservedAt, gain: growth ? growth.gain : null };
     await tx.put('dfp_results', INDEX_ID, { recordType: 'fans_history_index', authors, updatedAt: now });
     return true;
   });
@@ -59,8 +73,9 @@ async function recordFansObservation(store, lease, { authorId, author, fans, at,
 async function selectRecheck(store, now, limit = RULES.recheckPerRound) {
   const index = await store.get('dfp_results', INDEX_ID);
   return Object.entries(index?.authors || {})
-    .filter(([id, x]) => ID.test(id) && (x.lastObservedAt || 0) <= now - RULES.recheckAfterMs)
-    .sort((a, b) => (a[1].lastObservedAt || 0) - (b[1].lastObservedAt || 0) || a[0].localeCompare(b[0]))
+    .filter(([id, x]) => ID.test(id) && Math.max(x.lastObservedAt || 0, x.lastAttemptAt || 0) <= now - RULES.recheckAfterMs)
+    .sort((a, b) => Math.max(a[1].lastObservedAt || 0, a[1].lastAttemptAt || 0) - Math.max(b[1].lastObservedAt || 0, b[1].lastAttemptAt || 0)
+      || a[0].localeCompare(b[0]))
     .slice(0, limit).map(([id]) => id);
 }
 async function publishedRecently(store, authorId, now) {
@@ -84,4 +99,4 @@ async function risingAccounts(store, now, limit = RULES.maxPerRound) {
   }
   return accounts;
 }
-module.exports = { RULES, INDEX_ID, historyId, publishedId, prunePoints, gainWithin, summarize, recordFansObservation, selectRecheck, publishedRecently, risingAccounts };
+module.exports = { RULES, INDEX_ID, historyId, publishedId, prunePoints, gainWithin, summarize, recordFansObservation, markRecheckAttempt, selectRecheck, publishedRecently, risingAccounts };

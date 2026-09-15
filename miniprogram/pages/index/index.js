@@ -13,7 +13,7 @@ Page({
     statusLabel: '正在查看更新', statusTone: '', roundLabel: '每天更新，给创作找点新意', updatedLabel: '',
     partialReason: '', coverageNotice: '基于当轮关键词发现选题，未覆盖小红书全部内容。',
     favoriteNotice: '收藏仅保存在本机',
-    newAvailable: false, total: 0, favoriteCount: 0, nextCursor: /** @type {string|null} */ (null),
+    newAvailable: false, total: 0, entries: 0, favoriteCount: 0, nextCursor: /** @type {string|null} */ (null),
     rounds: /** @type {RoundItem[]} */ ([]), roundIndex: 0, olderRounds: false,
     sorts: /** @type {Record<string,string>} */ ({}), boardViews: boards([], {}, () => false, []),
     favoriteCards: /** @type {ReturnType<typeof card>[]} */ ([]), missingFavorites: /** @type {string[]} */ ([])
@@ -84,7 +84,7 @@ Page({
   dropAccess(access, message) {
     this._requestId++; this._statusRequestId++;
     this._notes = []; this._poller?.hide();
-    this.setData({ access, role: '', boardViews: [], favoriteCards: [], total: 0,
+    this.setData({ access, role: '', boardViews: [], favoriteCards: [], total: 0, entries: 0,
       message, loading: false, loadingMore: false });
   },
   /** @param {{detail:{value:string}}} event */
@@ -164,7 +164,9 @@ Page({
     const has = (/** @type {string} */ id) => this._favorites?.has(id) || false;
     // Accounts belong to the round being shown; searches and favourites are note lists, so the board stays empty there.
     const accounts = this.data.mode === 'round' || this.data.mode === 'history' ? this._accounts : [];
-    this.setData({ total: this._notes.length, boardViews: boards(this._notes, this.data.sorts, has, accounts),
+    // A round can publish rising accounts without any new note, so the boards are shown whenever either exists.
+    this.setData({ total: this._notes.length, entries: this._notes.length + accounts.length,
+      boardViews: boards(this._notes, this.data.sorts, has, accounts),
       favoriteCards: this.data.mode === 'favorites' ? this._notes.map(note => card(note, note.boards?.[0] || 'week', 'likes', has(note.noteId))) : [],
       favoriteCount: this._favorites?.ids().length || 0 });
   },
