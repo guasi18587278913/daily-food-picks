@@ -10,50 +10,84 @@ const { Readable } = require('node:stream');
 const { createHash } = require('node:crypto');
 const execDefault = promisify(execCallback);
 const MAX_BYTES = 32 * 1024 * 1024, FRAME_COUNT = 6, MAX_DURATION = 600000;
+// One attempt may take 25 s but is abandoned after 8 s without data; alternate hosts share a 35 s download budget,
+// so download, decode (25 s) and the vision request (35 s) still fit the runner's 100 s visual window.
+// 2026-09-15: in one round nine downloads failed on the same CDN hosts where larger files succeeded, and the same
+// files later downloaded locally at about 2 MB/s, which points to stalled connections rather than slow ones.
+const ATTEMPT_TIMEOUT_MS = 25000, STALL_TIMEOUT_MS = 8000, DOWNLOAD_BUDGET_MS = 35000, MAX_ALTERNATES = 4;
 const SAMPLER_VERSION = 'six-interior-1';
-function fail(code) { const e = new Error(code); e.code = code; throw e; }
+function fail(code, extra) { const e = new Error(code); e.code = code; Object.assign(e, extra); throw e; }
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-function validateMedia(media) {
-  let url; try { url = new URL(media?.url); } catch { fail('VIDEO_UNAVAILABLE'); }
+function approvedMediaUrl(value) {
+  let url; try { url = new URL(value); } catch { return null; }
   if (url.protocol !== 'https:' || url.username || url.password || (url.port && url.port !== '443')
-    || !/(^|\.)(xhscdn\.com|rednotecdn\.com)$/.test(url.hostname) || url.href.length > 4000
-    || typeof media.identity !== 'string' || !media.identity || media.identity.length > 100) fail('VIDEO_UNAVAILABLE');
-  if (Number.isFinite(media.bytes) && (media.bytes <= 0 || media.bytes > MAX_BYTES)) fail('VIDEO_TOO_LARGE');
-  if (Number.isFinite(media.durationMs) && (media.durationMs <= 0 || media.durationMs > MAX_DURATION)) fail('VIDEO_TOO_LONG');
+    || !/(^|\.)(xhscdn\.com|rednotecdn\.com)$/.test(url.hostname) || url.href.length > 4000) return null;
   return url.href;
 }
-async function download(media, file, fetcher) {
-  const url = validateMedia(media);
-  const response = await fetcher(url, { redirect: 'error', signal: AbortSignal.timeout(25000) });
-  if (!response.ok || !response.body) fail('VIDEO_DOWNLOAD_FAILED');
-  const declared = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declared) && declared > MAX_BYTES) fail('VIDEO_TOO_LARGE');
-  let bytes = 0;
-  await pipeline(Readable.fromWeb(response.body), async function* (chunks) {
-    for await (const chunk of chunks) { bytes += chunk.length; if (bytes > MAX_BYTES) fail('VIDEO_TOO_LARGE'); yield chunk; }
-  }, createWriteStream(file, { mode: 0o600 }));
-  if (bytes < 12) fail('VIDEO_INVALID_CONTAINER');
-  const handle = await fs.open(file, 'r');
+function validateMedia(media) {
+  const url = approvedMediaUrl(media?.url);
+  if (!url || typeof media.identity !== 'string' || !media.identity || media.identity.length > 100) fail('VIDEO_UNAVAILABLE');
+  if (Number.isFinite(media.bytes) && (media.bytes <= 0 || media.bytes > MAX_BYTES)) fail('VIDEO_TOO_LARGE');
+  if (Number.isFinite(media.durationMs) && (media.durationMs <= 0 || media.durationMs > MAX_DURATION)) fail('VIDEO_TOO_LONG');
+  const alternates = (Array.isArray(media.backupUrls) ? media.backupUrls : []).slice(0, MAX_ALTERNATES).map(approvedMediaUrl).filter(Boolean);
+  return [...new Set([url, ...alternates])];
+}
+async function downloadOnce(url, file, fetcher, timeoutMs, progress, { now, stallTimeoutMs }) {
+  const controller = new AbortController();
+  let timer = null;
+  const arm = ms => { clearTimeout(timer); timer = setTimeout(() => controller.abort(new DOMException('stalled', 'TimeoutError')), ms); };
+  const remaining = () => Math.max(1, timeoutMs - (now() - progress.startedAt));
+  arm(Math.min(stallTimeoutMs, remaining()));
   try {
-    const header = Buffer.alloc(12); await handle.read(header, 0, 12, 0);
-    if (header.toString('ascii', 4, 8) !== 'ftyp') fail('VIDEO_INVALID_CONTAINER');
-  } finally { await handle.close(); }
-  return bytes;
+    const response = await fetcher(url, { redirect: 'error', signal: controller.signal });
+    if (!response.ok || !response.body) fail('VIDEO_DOWNLOAD_FAILED');
+    const declared = Number(response.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > MAX_BYTES) fail('VIDEO_TOO_LARGE');
+    await pipeline(Readable.fromWeb(response.body), async function* (chunks) {
+      for await (const chunk of chunks) {
+        progress.bytes += chunk.length; if (progress.bytes > MAX_BYTES) fail('VIDEO_TOO_LARGE');
+        arm(Math.min(stallTimeoutMs, remaining())); yield chunk;
+      }
+    }, createWriteStream(file, { mode: 0o600 }));
+  } finally { clearTimeout(timer); }
+}
+async function download(media, file, fetcher, { now = Date.now, stallTimeoutMs = STALL_TIMEOUT_MS } = {}) {
+  const urls = validateMedia(media);
+  const deadline = now() + DOWNLOAD_BUDGET_MS;
+  const attempts = [];
+  for (const url of urls) {
+    const remaining = deadline - now();
+    if (attempts.length && remaining < 5000) break;
+    const progress = { bytes: 0, startedAt: now() };
+    const host = new URL(url).hostname;
+    try {
+      await downloadOnce(url, file, fetcher, Math.min(ATTEMPT_TIMEOUT_MS, remaining), progress, { now, stallTimeoutMs });
+      attempts.push({ host, code: 'ok', bytes: progress.bytes, ms: now() - progress.startedAt });
+      if (progress.bytes < 12) fail('VIDEO_INVALID_CONTAINER');
+      const handle = await fs.open(file, 'r');
+      try {
+        const header = Buffer.alloc(12); await handle.read(header, 0, 12, 0);
+        if (header.toString('ascii', 4, 8) !== 'ftyp') fail('VIDEO_INVALID_CONTAINER');
+      } finally { await handle.close(); }
+      return { bytes: progress.bytes, attempts };
+    } catch (e) {
+      if (typeof e.code === 'string' && e.code.startsWith('VIDEO_') && !['VIDEO_DOWNLOAD_FAILED'].includes(e.code)) throw Object.assign(e, { downloadAttempts: attempts });
+      const code = ['TimeoutError', 'AbortError'].includes(e.name) ? 'VIDEO_DOWNLOAD_TIMEOUT' : 'VIDEO_DOWNLOAD_FAILED';
+      attempts.push({ host, code, bytes: progress.bytes, ms: now() - progress.startedAt });
+      await fs.rm(file, { force: true });
+    }
+  }
+  fail(attempts.some(a => a.code === 'VIDEO_DOWNLOAD_TIMEOUT') ? 'VIDEO_DOWNLOAD_TIMEOUT' : 'VIDEO_DOWNLOAD_FAILED', { downloadAttempts: attempts });
 }
 async function extractFrames(media, { fetcher = fetch, execFile = execDefault, tempRoot = os.tmpdir(),
   ffmpegPath = path.join(__dirname, '../bin/ffmpeg'), ffprobePath = path.join(__dirname, '../bin/ffprobe'),
-  processTimeoutMs = 25000 } = {}) {
+  processTimeoutMs = 25000, now = Date.now, stallTimeoutMs = STALL_TIMEOUT_MS } = {}) {
   validateMedia(media);
   const directory = await fs.mkdtemp(path.join(tempRoot, 'dfp-video-'));
   await fs.chmod(directory, 0o700);
   try {
     const videoPath = path.join(directory, 'input.mp4');
-    let downloadedBytes;
-    try { downloadedBytes = await download(media, videoPath, fetcher); }
-    catch (e) {
-      if (typeof e.code === 'string' && e.code.startsWith('VIDEO_')) throw e;
-      fail(['TimeoutError', 'AbortError'].includes(e.name) ? 'VIDEO_DOWNLOAD_TIMEOUT' : 'VIDEO_DOWNLOAD_FAILED');
-    }
+    const { bytes: downloadedBytes, attempts: downloadAttempts } = await download(media, videoPath, fetcher, { now, stallTimeoutMs });
     const deadline = Date.now() + Math.min(processTimeoutMs, 25000);
     async function run(binary, args) {
       const remaining = deadline - Date.now(); if (remaining <= 0) fail('VIDEO_PROCESS_TIMEOUT');
@@ -86,7 +120,7 @@ async function extractFrames(media, { fetcher = fetch, execFile = execDefault, t
     const image = await fs.readFile(sheetPath);
     if (image.length > 2 * 1024 * 1024 || image[0] !== 0xff || image[1] !== 0xd8) fail('VIDEO_FRAME_INVALID');
     return { image, images, imageHash: hash(image), frameCount: FRAME_COUNT, samples, durationMs,
-      downloadedBytes, samplerVersion: SAMPLER_VERSION, mediaIdentity: media.identity };
+      downloadedBytes, downloadAttempts, samplerVersion: SAMPLER_VERSION, mediaIdentity: media.identity };
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 }
-module.exports = { extractFrames, validateMedia, MAX_BYTES, MAX_DURATION, FRAME_COUNT, SAMPLER_VERSION };
+module.exports = { extractFrames, validateMedia, MAX_BYTES, MAX_DURATION, FRAME_COUNT, SAMPLER_VERSION, ATTEMPT_TIMEOUT_MS, STALL_TIMEOUT_MS, DOWNLOAD_BUDGET_MS };

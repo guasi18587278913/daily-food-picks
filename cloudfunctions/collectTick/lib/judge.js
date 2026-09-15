@@ -45,7 +45,18 @@ function parseJudgment(raw, note) {
 function needsTextModel(note) {
   return completeText(note) && !!(note.desc.trim() || (note.type === 'video' && note.title.trim()));
 }
-async function judgeNote(note, generate) {
+// The free channel answers HTTP 429 at random (measured 2026-09-15: about four in ten calls, independent of pacing),
+// and each such answer clears within seconds, so a rate-limited call is retried a bounded number of times.
+const RATE_LIMIT_RETRY_DELAYS_MS = Object.freeze([1500, 3500]);
+function modelErrorCategory(error) {
+  const raw = error?.status ?? error?.statusCode ?? (/^\d{3}$/.test(String(error?.code ?? '')) ? Number(error.code) : undefined);
+  const status = Number.isInteger(raw) && raw >= 100 && raw <= 599 ? raw : null;
+  const category = /timeout|timed out|超时/i.test(String(error?.message || '')) || error?.name === 'AbortError'
+    ? 'timeout' : status === 401 || status === 403 ? 'authorization' : status === 429 ? 'rate_limit' : 'service';
+  return { category, status };
+}
+async function judgeNote(note, generate, { sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  retryDelaysMs = RATE_LIMIT_RETRY_DELAYS_MS } = {}) {
   if (!needsTextModel(note)) {
     return { verdict: 'uncertain', evidence: '', reason: 'incomplete_body' };
   }
@@ -57,14 +68,15 @@ async function judgeNote(note, generate) {
       + '只返回JSON：{"verdict":"cooking|not_cooking|uncertain","evidence":"对应来源里逐字复制的一个连续短句，最多120字符","evidenceSource":"title|desc"}。cooking和not_cooking都必须引用支持判断的原句；标题证据用title，正文证据用desc。保留空格符号，不拼接、概括或补全；uncertain可给空证据。不要添加其他字段。' },
     { role: 'user', content: JSON.stringify({ type: note.type, title: note.title, desc: note.desc }) }
   ];
-  try { return { ...parseJudgment(await generate(messages), note), inputHash: digest([note.type, note.title, note.desc]) }; }
-  catch (error) {
-    const status = error?.status ?? error?.statusCode;
-    const category = /timeout|timed out|超时/i.test(String(error?.message || '')) || error?.name === 'AbortError'
-      ? 'timeout' : status === 401 || status === 403 ? 'authorization' : status === 429 ? 'rate_limit' : 'service';
-    // Persist categories and HTTP status only; SDK errors can contain credentials or input text.
-    return { verdict: 'error', evidence: '', reason: 'model_unavailable',
-      diagnostics: { category, httpStatus: Number.isInteger(status) && status >= 100 && status <= 599 ? status : null } };
+  for (let attempt = 1; ; attempt++) {
+    try { return { ...parseJudgment(await generate(messages), note), inputHash: digest([note.type, note.title, note.desc]) }; }
+    catch (error) {
+      const { category, status } = modelErrorCategory(error);
+      if (category === 'rate_limit' && attempt <= retryDelaysMs.length) { await sleep(retryDelaysMs[attempt - 1]); continue; }
+      // Persist categories, HTTP status and attempt counts only; SDK errors can contain credentials or input text.
+      return { verdict: 'error', evidence: '', reason: category === 'rate_limit' ? 'model_rate_limited' : 'model_unavailable',
+        diagnostics: { category, httpStatus: status, attempts: attempt } };
+    }
   }
 }
 function freeModelGenerator(app) {
@@ -75,4 +87,4 @@ function freeModelGenerator(app) {
   };
 }
 
-module.exports = { parseJudgment, judgeNote, freeModelGenerator, needsTextModel };
+module.exports = { parseJudgment, judgeNote, freeModelGenerator, needsTextModel, modelErrorCategory, RATE_LIMIT_RETRY_DELAYS_MS };

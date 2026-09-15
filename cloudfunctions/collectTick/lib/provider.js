@@ -69,7 +69,8 @@ function mediaOf(raw) {
   const media = raw.video_info_v2?.media;
   const streamGroups = media?.stream || {};
   const streams = Object.values(streamGroups).filter(Array.isArray).flat().slice(0, 40)
-    .map(s => ({ url: mediaUrl(s?.master_url), bytes: metric(s?.size) }))
+    .map(s => ({ url: mediaUrl(s?.master_url), bytes: metric(s?.size),
+      backups: (Array.isArray(s?.backup_urls) ? s.backup_urls : []).slice(0, 4).map(mediaUrl).filter(Boolean) }))
     .filter(s => s.url && s.bytes > 0 && s.bytes <= 32 * 1024 * 1024)
     .sort((a, b) => a.bytes - b.bytes);
   if (!streams.length) return null;
@@ -78,7 +79,9 @@ function mediaOf(raw) {
   const chosen = streams[0];
   const contentId = /^[a-f0-9]{32}$/i.test(media?.video?.md5 || '')
     ? media.video.md5.toLowerCase() : new URL(chosen.url).pathname;
-  return { ...chosen, durationMs, identity: digest(contentId) };
+  // Alternate hosts for the same file, then the next-smallest rendition: a stalled CDN edge is not the video's fault.
+  const backupUrls = [...new Set([...chosen.backups, ...(streams[1] ? [streams[1].url] : [])])].filter(u => u !== chosen.url).slice(0, 4);
+  return { url: chosen.url, bytes: chosen.bytes, ...(backupUrls.length ? { backupUrls } : {}), durationMs, identity: digest(contentId) };
 }
 function metadataSignals(spec, inner) {
   const rows = spec.signalRows(inner);

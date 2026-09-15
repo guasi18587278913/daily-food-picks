@@ -289,9 +289,14 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
             await saveProgress(store, lease, round.id, progress, clock);
           }
           row.note = { ...row.note, ...full, fans: full.fans ?? row.note.fans };
+          row.detailFetched = true;
           // The sweep only publishes today picks: a detail that moves a note out of the today window ends its inspection.
           if (!admitsCandidate(round, row.note)) {
             row.stage = 'skipped'; row.skipReason = 'outside_metrics_after_detail'; row.outcome = 'rejected_metrics';
+          } else if (row.mediaLookup) {
+            // A related video already judged on text came here only for its stream address.
+            if (row.note.media) row.stage = 'visual';
+            else { row.stage = 'skipped'; row.outcome = 'incomplete'; row.errorCode = 'VIDEO_UNAVAILABLE'; row.visualDiagnostics = { code: 'VIDEO_UNAVAILABLE' }; progress.gaps.push('VIDEO_UNAVAILABLE'); }
           } else row.stage = 'judge';
           await save();
         } else if (row.stage === 'judge') {
@@ -328,9 +333,12 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           if (discovery && row.stage === 'history') await discovery.rememberCooking(row.note);
           await save(true);
         } else if (row.stage === 'visual') {
-          // Download, decode and model each have their own deadlines; start only with room for the full chain.
+          // Download (35 s across hosts), decode (25 s) and model (35 s) each have their own deadlines; start only with room for the chain.
           if (clock() >= Math.min(deadline, round.closesAt) - 100000) break;
           if (!config.vision?.enabled) { row.stage = 'skipped'; row.outcome = 'incomplete'; await save(); continue; }
+          // Detail-attached videos arrive without a stream address; one detail request of their own supplies it.
+          // A video whose own detail already lacked a stream is not asked again.
+          if (!row.note.media && !row.detailFetched && !row.mediaLookup) { row.mediaLookup = true; row.stage = 'detail'; await save(); continue; }
           try {
             const result = await review({ store, lease, round, note: row.note, settings: config.vision, key: visionKey, clock });
             if (result.cacheWarning) progress.gaps.push(result.cacheWarning);
@@ -352,11 +360,17 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
             const gap = ['VISION_OUTPUT_INVALID', 'VISION_OUTPUT_TRUNCATED'].includes(e.code) ? e.code
               : /VISION_.*BUDGET/.test(e.code) ? 'VISION_BUDGET' : /^VIDEO_/.test(e.code) ? 'VIDEO_UNAVAILABLE' : 'VISION_UNAVAILABLE';
             progress.gaps.push(gap); row.stage = 'skipped'; row.outcome = 'incomplete'; row.errorCode = gap;
+            const integer = (value, max) => Number.isSafeInteger(value) && value >= 0 && value <= max ? value : null;
             row.visualDiagnostics = {
               code: typeof e.code === 'string' && /^(?:VISION|VIDEO)_[A-Z_]{1,60}$/.test(e.code) ? e.code : 'VISION_UNAVAILABLE',
               validationIssue: typeof e.validationIssue === 'string' && /^[A-Z_]{1,60}$/.test(e.validationIssue) ? e.validationIssue : null,
               attemptId: typeof e.attemptId === 'string' && /^vision_[a-f0-9]{48}$/.test(e.attemptId) ? e.attemptId : null,
-              httpStatus: Number.isInteger(e.httpStatus) && e.httpStatus >= 100 && e.httpStatus <= 599 ? e.httpStatus : null
+              httpStatus: Number.isInteger(e.httpStatus) && e.httpStatus >= 100 && e.httpStatus <= 599 ? e.httpStatus : null,
+              // Host, bytes received and elapsed time per download attempt: enough to tell a slow edge from a dead file.
+              downloadAttempts: Array.isArray(e.downloadAttempts) ? e.downloadAttempts.slice(0, 5).map(a => ({
+                host: typeof a?.host === 'string' && /^[a-z0-9.-]{1,80}$/.test(a.host) ? a.host : null,
+                code: typeof a?.code === 'string' && /^[a-zA-Z_]{1,40}$/.test(a.code) ? a.code : null,
+                bytes: integer(a?.bytes, 64 * 1024 * 1024), ms: integer(a?.ms, 600000) })) : null
             };
           }
           await save(); await saveProgress(store, lease, round.id, progress, clock);
