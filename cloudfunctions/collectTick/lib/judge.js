@@ -4,7 +4,9 @@ const { digest } = require('./provider');
 // These cues validate a title-only claim; they never classify a note as cooking on their own.
 const PREPARATION_INTENT = /教程|做法|制作|自制|复刻|下厨|一锅出|教.{0,12}做|(?:怎么|怎样|如何|这样|在家|亲手|一起|动手|沉浸式|学).{0,8}做|(?:^|[\s，。！!？?：:～~])做[^\s，。！？!?#]{1,30}|\b(?:recipe|tutorial|homemade|how to (?:make|cook))\b/i;
 const RECIPE_DETAIL = /\d+(?:\.\d+)?\s*(?:克|g|毫升|ml|勺|个|分钟|小时)|(?:加|倒|放|切|搅|拌|蒸|煮|炒|烤|煎|炖|焖).{0,30}(?:熟|匀|分钟|小时)/i;
-const EXCLUSION_CUE = /吃播|探店|外卖|晒(?:菜|饭|晚餐)|开箱|种草|购买|猫|狗|宠物|旅游|旅行|vlog/i;
+// Substring cues used to fire inside dish names: 猫耳朵, 狗不理, 熊猫饭团, and "材料可以在超市购买" all read as
+// exclusions. Pet words now need a pet context, and the generic 购买 is dropped since 种草 and 开箱 cover shopping.
+const EXCLUSION_CUE = /吃播|探店|外卖|晒(?:菜|饭|晚餐)|开箱|种草|旅游|旅行|vlog|宠物|猫(?:粮|条|砂|咪|主子)|狗(?:粮|子|主子)/i;
 const caption = text => text.replace(/#[^#\n]*(?:#|$)/gm, ' ').replace(/\s+/g, ' ').trim();
 const preparationEvidence = text => PREPARATION_INTENT.test(text) || RECIPE_DETAIL.test(text);
 function completeText(note) {

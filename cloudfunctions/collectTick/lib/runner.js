@@ -41,6 +41,8 @@ function unconfirmedReason(row) {
   if (/^VISION_.*BUDGET/.test(code)) return 'vision_budget';
   if (/^VISION_/.test(code)) return 'vision_unavailable';
   if (row.note.judgment?.verdict === 'error') return 'model_unavailable';
+  // The frames were already read and showed nothing conclusive; saying the steps might be in the video would be false.
+  if (row.note.judgment?.evidenceSource === 'frames') return 'frames_inconclusive';
   if (row.note.type === 'video' && row.note.textJudgment?.verdict !== 'cooking') return 'steps_in_video';
   return 'no_text_evidence';
 }
@@ -338,7 +340,7 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           } else if (row.mediaLookup) {
             // A related video already judged on text came here only for its stream address.
             if (row.note.media) row.stage = 'visual';
-            else { row.stage = 'skipped'; row.outcome = 'incomplete'; row.errorCode = 'VIDEO_UNAVAILABLE'; row.visualDiagnostics = { code: 'VIDEO_UNAVAILABLE' }; progress.gaps.push('VIDEO_UNAVAILABLE'); }
+            else { row.stage = 'history'; row.errorCode = 'VIDEO_UNAVAILABLE'; row.visualDiagnostics = { code: 'VIDEO_UNAVAILABLE' }; progress.gaps.push('VIDEO_UNAVAILABLE'); }
           } else row.stage = 'judge';
           await save();
         } else if (row.stage === 'judge') {
@@ -432,7 +434,9 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
             && admitsCandidate(round, row.note) ? 'visual' : 'history';
           progress.gaps.push(adaptive && unknownCall ? 'MODEL_UNAVAILABLE' : 'REQUEST_FAILED'); await save(true);
         } else if (row.stage === 'history') {
-          if (eligibleBoards(row.note, round.scheduledAt).includes('today')) {
+          // Paid enrichment stays with confirmed works: unconfirmed ones now reach the page too, and must not
+          // spend the round's remaining calls on an author baseline or a profile link.
+          if (row.note.judgment?.verdict === 'cooking' && eligibleBoards(row.note, round.scheduledAt).includes('today')) {
             const cacheId = `history_${round.id}_${row.note.authorId}`;
             let history = await store.get('dfp_results', cacheId);
             if (!history || (historyBaseline(row.note, history.notes).baselineReason === 'fewer_than_seven' && history.hasMore && history.cursor && history.pages < 2)) {
@@ -456,8 +460,8 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           row.stage = 'cover'; await save();
         } else if (row.stage === 'cover') {
           // Optional enrichment must not prevent a verified work from reaching publication.
-          if (!row.authorProfileChecked && row.note.boards?.length && clock() < deadline - 65000
-            && clock() < round.closesAt - 65000) {
+          if (!row.authorProfileChecked && row.note.boards?.length && row.note.contentStatus === 'confirmed'
+            && clock() < deadline - 65000 && clock() < round.closesAt - 65000) {
             try {
               const profile = await ensureAuthorProfile({ store, lease, provider, note: row.note, clock });
               row.authorProfileStatus = profile.status;

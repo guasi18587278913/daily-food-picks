@@ -25,7 +25,8 @@ function sortNotes(notes, key) {
 /** @type {Record<string,string>} */
 const UNCONFIRMED_REASON = {
   video_unreadable: '视频画面没读到', vision_unavailable: '画面复核没完成', vision_budget: '画面复核额度已用完',
-  model_unavailable: '内容判断暂时不可用', steps_in_video: '做法可能在视频里', no_text_evidence: '正文没写做法'
+  model_unavailable: '内容判断暂时不可用', frames_inconclusive: '画面里没看出做法',
+  steps_in_video: '做法可能在视频里', no_text_evidence: '正文没写做法'
 };
 const BOARD_INFO = {
   today: { name: '今日热榜', subtitle: '近 24 小时 · 至少 1,000 赞', sort: 'ratio', options: [['ratio', '倍数'], ['likes', '点赞'], ['collected', '收藏'], ['comments', '评论']] },

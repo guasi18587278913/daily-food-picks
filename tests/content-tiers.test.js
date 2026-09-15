@@ -44,6 +44,7 @@ function setup({ items, generate, visionError = false, vision = false }) {
       if (kind === 'get_creator_inspiration_feed') return response({ inspirations: [] });
       if (kind === 'search_notes') return response({ items: items.map(note => ({ note })) });
       if (kind === 'get_video_note_detail') return response([{ note_list: items }]);
+      if (kind === 'get_user_posted_notes') return response({ notes: [] });
       if (kind === 'get_user_info') return response({ fans: 4000 });
       throw Error('UNEXPECTED_REQUEST');
     } }) };
@@ -126,4 +127,45 @@ test('a board leads with confirmed works and labels the unconfirmed ones', () =>
   // An unknown or missing reason still reads as a sentence rather than a code.
   assert.equal(card(entry(4, { contentStatus: 'unconfirmed', contentReason: 'something_new' }), 'week', 'likes', false).statusHint, '还没确认是做法内容');
   assert.equal(card(entry(5), 'week', 'likes', false).unconfirmed, false);
+});
+
+test('reading the frames and finding nothing is not reported as steps hidden in the video', async () => {
+  const items = [raw(1, { title: '牛腱肉', desc: '' })];
+  const x = setup({ items, vision: true,
+    generate: async () => JSON.stringify({ verdict: 'uncertain', evidence: '' }) });
+  x.deps.review = async () => ({ verdict: 'uncertain', evidenceSource: 'frames', evidence: [], reason: 'identical_frames' });
+  const result = await run(x.deps);
+  const snapshot = await readSnapshot(x.store, result.snapshotId);
+  const note = snapshot.notes.find(n => n.noteId === id(1));
+  assert.equal(note.contentStatus, 'unconfirmed');
+  assert.equal(note.contentReason, 'frames_inconclusive');
+  assert.equal(UNCONFIRMED_REASON[note.contentReason], '画面里没看出做法');
+});
+
+test('an unconfirmed work costs no author baseline and no profile lookup', async () => {
+  const today = { time: (NOW - 3600000) / 1000, liked_count: 4000 };
+  const items = [raw(1, { ...today, desc: '鸡蛋2个加水搅匀，蒸十分钟。' }), raw(2, { ...today, title: '牛腱肉', desc: '' })];
+  const x = setup({ items, generate: async messages => JSON.parse(messages[1].content).desc.includes('搅匀')
+    ? JSON.stringify({ verdict: 'cooking', evidence: '鸡蛋2个加水搅匀', evidenceSource: 'desc' })
+    : JSON.stringify({ verdict: 'uncertain', evidence: '' }) });
+  const result = await run(x.deps);
+  const snapshot = await readSnapshot(x.store, result.snapshotId);
+  assert.deepEqual(snapshot.notes.map(n => [n.noteId, n.contentStatus]).sort(), [[id(1), 'confirmed'], [id(2), 'unconfirmed']]);
+  // One author-posts request for the confirmed today pick, and one profile lookup for it; the unconfirmed work adds neither.
+  assert.equal(x.calls.filter(c => c === 'get_user_posted_notes').length, 1);
+  assert.equal(x.calls.filter(c => c === 'get_user_info').length, 1);
+  assert.equal(snapshot.notes.find(n => n.noteId === id(2)).baseline, null);
+});
+
+test('exclusion cues name the thing excluded and do not fire inside dish names', () => {
+  const rejection = (desc, evidence) => parseJudgment(JSON.stringify({ verdict: 'not_cooking', evidence, evidenceSource: 'desc' }),
+    note({ desc })).verdict;
+  assert.equal(rejection('喵铮铮这款猫条有香香乳鸽。', '喵铮铮这款猫条'), 'not_cooking');
+  assert.equal(rejection('今天带你探店这家川菜馆。', '今天带你探店这家川菜馆'), 'not_cooking');
+  assert.equal(rejection('记录旅行途中的市集。', '记录旅行途中的市集'), 'not_cooking');
+  // Dish names that used to read as pet or shopping content.
+  assert.equal(rejection('猫耳朵面片的做法，手擀。', '猫耳朵面片的做法'), 'uncertain');
+  assert.equal(rejection('狗不理包子复刻，十八个褶。', '狗不理包子复刻'), 'uncertain');
+  assert.equal(rejection('熊猫饭团教程，孩子爱吃。', '熊猫饭团教程'), 'uncertain');
+  assert.equal(rejection('材料可以在超市购买，很便宜。', '材料可以在超市购买'), 'uncertain');
 });

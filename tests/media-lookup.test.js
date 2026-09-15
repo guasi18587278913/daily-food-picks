@@ -50,8 +50,10 @@ test('when the detail still has no stream the video is left unconfirmed without 
   assert.equal(result.status, 'partial');
   assert.equal(x.calls.filter(c => c === `get_video_note_detail:${id(2)}`).length, 1);
   assert.deepEqual(x.reviewed, [id(1)]);
+  // Since the three tiers it reaches the page as unconfirmed, with the unreadable video named as the reason.
   const row = await x.store.get('dfp_candidates', `20260912-0900_${id(2)}`);
-  assert.equal(row.stage, 'skipped'); assert.equal(row.outcome, 'incomplete'); assert.equal(row.errorCode, 'VIDEO_UNAVAILABLE');
+  assert.equal(row.stage, 'done'); assert.equal(row.outcome, 'unconfirmed'); assert.equal(row.errorCode, 'VIDEO_UNAVAILABLE');
+  assert.equal(row.note.contentStatus, 'unconfirmed'); assert.equal(row.note.contentReason, 'video_unreadable');
   const round = await x.store.get('dfp_rounds', '20260912-0900');
   assert.ok(round.coverage.gaps.includes('VIDEO_UNAVAILABLE'));
 });
