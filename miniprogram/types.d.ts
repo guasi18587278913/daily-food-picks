@@ -7,6 +7,9 @@ interface RisingAccount {
   fansBefore: number | null;
   fansDelta: number;
   gainRate?: number | null;
+  spikeDate?: string | null;
+  spikeGain?: number | null;
+  source?: 'pgy' | 'observed' | null;
   observedAt: string | null;
   baselineAt: string | null;
   spanHours: number | null;

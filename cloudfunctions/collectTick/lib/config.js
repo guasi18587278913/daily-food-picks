@@ -142,7 +142,7 @@ function scheduledRound(now, config) {
     sweepEnabled: Boolean(config.sweepCalls), roundCalls, ...(supplement ? { supplement: true, reservedRegularCalls } : {}),
     ...(config.budgetTier === 'expanded250' ? { budgetTier: 'expanded250' } : {}),
     ...(config.discoveryMode === 'adaptive' ? { discoveryMode: 'adaptive',
-      ...(config.budgetTier === 'expanded250' ? { discoveryAllocation: 'candidate-reserve-v2' }
+      ...(config.budgetTier === 'expanded250' ? { discoveryAllocation: 'candidate-reserve-v2', risingSource: 'pgy' }
         : { discoveryLimit: kind === 'sweep' ? 18 : 4 }),
       ...(config.budgetTier === 'expanded250' && kind === 'regular' ? { candidateTarget: 20 } : {}),
       visionEnabled: config.vision?.enabled === true, ...(config.vision?.enabled ? { visionRoundCalls: config.vision.roundCalls } : {}) } : {}) };

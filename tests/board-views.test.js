@@ -7,6 +7,7 @@ const note = (patch = {}) => ({ noteId: id(1), title: '蒸蛋', author: '作者'
   likes: 800, collected: 1200, comments: 120, shared: 40, fans: 90000, ratio: null, fanRatio: null, collectRatio: 1.5, engageRatio: 0.2, baseline: null, boards: ['engage'], ...patch });
 const account = (patch = {}) => ({ authorId: id(201), author: '涨粉号', fans: 5300, fansBefore: 4000, fansDelta: 1300, gainRate: 0.325,
   observedAt: '2026-09-15T04:00:00.000Z', baselineAt: '2026-09-12T04:00:00.000Z', spanHours: 72,
+  spikeDate: '2026-09-13', spikeGain: 900, source: 'pgy',
   notes: [{ noteId: id(50), title: '蒸蛋', likes: 800, collected: 1200, publishedAt: '2026-09-14T02:00:00.000Z' }], ...patch });
 
 test('the four boards appear in the order the user defined, with rising showing accounts', () => {
@@ -37,6 +38,10 @@ test('accounts are ranked by follower gain and rendered as readable facts', () =
   assert.equal(rising.accounts[1].fansLabel, '4000 → 5300 粉丝');
   assert.equal(rising.accounts[1].notes[0].metric, '800 赞 · 1200 收藏');
   assert.equal(accountCard(account({ spanHours: null })).spanLabel, '观测跨度未知');
+  // The breakout day is shown when it is known, and simply omitted when it is not.
+  assert.equal(rising.accounts[1].spikeLabel, '9月13日 单日涨 900');
+  assert.equal(accountCard(account({ spikeDate: null })).spikeLabel, '');
+  assert.equal(accountCard(account({ spikeGain: null })).spikeLabel, '');
   assert.equal(accountCard(account({ author: null, notes: [] })).displayName, '作者未提供');
   assert.deepEqual(accountCard(account({ notes: [] })).notes, []);
 });

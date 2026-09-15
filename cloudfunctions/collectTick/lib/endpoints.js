@@ -14,7 +14,15 @@
 //   topicFromDeeplink  leads without a page_id may carry one inside their xhsdiscover deeplink
 //   detail          the endpoint returns one requested note plus related ones
 //   discoveryOnly   may only be charged to the round's discovery allowance, never to inspection
+//   base            request base URL, when the series differs from App V2 (the PGY rows below)
+//   method          'POST' sends the parameters as a JSON body; the default GET puts them in the query
 const ID = /^[0-9a-f]{24}$/;
+// Pugongying is Xiaohongshu's own creator-marketing platform. Its blogger square ranks accounts by follower growth,
+// which no App V2 endpoint reports, and its fans history returns the daily gain behind that ranking.
+const PGY_BASE = 'https://api.tikhub.io/api/v1/xiaohongshu/pgy/';
+const range = (value, min, max) => value === undefined || (Number.isInteger(value) && value >= min && value <= max);
+const names = (value, limit) => value === undefined
+  || (Array.isArray(value) && value.length >= 1 && value.length <= limit && value.every(x => typeof x === 'string' && x.trim() !== '' && x.length <= 64));
 const identifier = field => params => ID.test(params[field] || '');
 const optionalCursor = params => params.cursor === undefined || typeof params.cursor === 'string';
 const listRows = inner => inner.notes ?? inner.items ?? inner.list;
@@ -53,7 +61,18 @@ const ENDPOINTS = Object.freeze({
   faved: Object.freeze({ path: 'get_user_faved_notes', yields: 'notes', source: 'faved', discoveryOnly: true,
     params: ['user_id', 'cursor'], accepts: identifier('user_id'),
     // A fallback page is TikHub substituting recommendations for a private collection, never the author's own picks.
-    rows: inner => inner.fallback === true ? null : listRows(inner) })
+    rows: inner => inner.fallback === true ? null : listRows(inner) }),
+  // Only the one shape the collector sends is accepted: the blogger square sorted by thirty-day follower growth.
+  pgy_bloggers: Object.freeze({ base: PGY_BASE, method: 'POST', path: 'get_blogger_list', yields: 'bloggers',
+    params: ['page_num', 'page_size', 'column', 'sort', 'blogger', 'flags'],
+    accepts: params => range(params.page_num, 1, 250) && range(params.page_size, 1, 20)
+      && params.column === 'fans30GrowthRate' && params.sort === 'desc'
+      && (params.blogger === undefined || (Object.keys(params.blogger).every(k => k === 'content_tag') && names(params.blogger.content_tag, 8)))
+      && (params.flags === undefined || (Object.keys(params.flags).every(k => k === 'exclude_fans_down') && params.flags.exclude_fans_down === true)),
+    rows: inner => Array.isArray(inner.kols) ? inner.kols : null }),
+  pgy_fans_history: Object.freeze({ base: PGY_BASE, method: 'POST', path: 'get_blogger_fans_history', yields: 'fans_history',
+    params: ['user_id', 'increase_type', 'date_type'],
+    accepts: params => ID.test(params.user_id || '') && params.increase_type === 2 && [1, 2].includes(params.date_type) })
 });
 
 // Own keys only: 'constructor' or '__proto__' must never resolve to an endpoint.
@@ -62,4 +81,4 @@ function endpoint(kind) {
 }
 const detailKind = noteType => noteType === 'video' ? 'note_video' : 'note_image';
 
-module.exports = { ENDPOINTS, ID, endpoint, detailKind };
+module.exports = { ENDPOINTS, ID, PGY_BASE, endpoint, detailKind };

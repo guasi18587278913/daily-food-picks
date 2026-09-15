@@ -29,9 +29,12 @@ const metric = value => Number.isSafeInteger(value) && value >= 0 ? value : null
 function publicAccount(account) {
   if (!/^[0-9a-f]{24}$/.test(account?.authorId || '') || !Number.isSafeInteger(account.fansDelta)) return null;
   const time = value => Number.isFinite(Date.parse(value)) ? new Date(Date.parse(value)).toISOString() : null;
+  const date = value => /^\d{4}-\d{2}-\d{2}$/.test(value || '') ? value : null;
   return { authorId: account.authorId, author: typeof account.author === 'string' ? account.author.slice(0, 120) : null,
     fans: metric(account.fans), fansBefore: metric(account.fansBefore), fansDelta: account.fansDelta,
     gainRate: typeof account.gainRate === 'number' && Number.isFinite(account.gainRate) ? account.gainRate : null,
+    spikeDate: date(account.spikeDate), spikeGain: metric(account.spikeGain),
+    source: ['pgy', 'observed'].includes(account.source) ? account.source : 'observed',
     observedAt: time(account.observedAt), baselineAt: time(account.baselineAt),
     spanHours: Number.isSafeInteger(account.spanHours) ? account.spanHours : null,
     notes: (Array.isArray(account.notes) ? account.notes : []).slice(0, 3).filter(n => /^[0-9a-f]{24}$/.test(n?.noteId || ''))
@@ -80,7 +83,9 @@ async function publish({ store, lease, round, notes, carriedNotes = [], accounts
   // The first entry for an author wins: the caller ranks them, so a later duplicate never rewrites what was chosen.
   const byAuthor = new Map();
   for (const account of accounts.map(publicAccount)) if (account && !byAuthor.has(account.authorId)) byAuthor.set(account.authorId, account);
-  const rising = [...byAuthor.values()].sort((a, b) => b.fansDelta - a.fansDelta || a.authorId.localeCompare(b.authorId));
+  // The board is about how fast an account grew relative to itself, so the rate leads and the absolute gain breaks ties.
+  const rising = [...byAuthor.values()].sort((a, b) => (b.gainRate ?? 0) - (a.gainRate ?? 0)
+    || b.fansDelta - a.fansDelta || a.authorId.localeCompare(b.authorId));
   const id = `${round.id}-${digest([visible, rising, status, coverage, partialReason]).slice(0, 12)}`;
   const existing = await store.get('dfp_snapshots', id);
   if (existing?.published) return existing;

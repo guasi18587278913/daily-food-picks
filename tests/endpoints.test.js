@@ -9,11 +9,14 @@ const ID = '1'.repeat(24);
 
 test('every endpoint row is complete for the readers that depend on it', () => {
   assert.deepEqual(Object.keys(ENDPOINTS).sort(),
-    ['author', 'faved', 'hot', 'inspiration', 'note_image', 'note_video', 'search', 'topic', 'user']);
+    ['author', 'faved', 'hot', 'inspiration', 'note_image', 'note_video', 'pgy_bloggers', 'pgy_fans_history', 'search', 'topic', 'user']);
   for (const [kind, spec] of Object.entries(ENDPOINTS)) {
     assert.match(spec.path, /^[a-z_]+$/, kind);
     assert.ok(Array.isArray(spec.params) && spec.params.length > 0 && typeof spec.accepts === 'function', kind);
-    assert.ok(['notes', 'signals', 'profile'].includes(spec.yields), kind);
+    assert.ok(['notes', 'signals', 'profile', 'bloggers', 'fans_history'].includes(spec.yields), kind);
+    // The Pugongying rows are the only ones that leave App V2 or send a body.
+    assert.equal(spec.method === 'POST', kind.startsWith('pgy_'), kind);
+    assert.equal(typeof spec.base === 'string', kind.startsWith('pgy_'), kind);
     if (spec.yields === 'notes') assert.ok(typeof spec.rows === 'function' && typeof spec.source === 'string', kind);
     if (spec.yields === 'signals') assert.equal(typeof spec.signalRows, 'function', kind);
     assert.equal(spec.detail === true, kind.startsWith('note_'), kind);

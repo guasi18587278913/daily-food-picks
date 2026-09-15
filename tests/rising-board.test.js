@@ -21,16 +21,24 @@ async function seed(store, entries) {
     await releaseLease(store, lease);
   }
 }
-function setup(store, { fansByAuthor = {}, userFailure = null } = {}) {
-  const userCalls = [];
-  const deps = { store, config: base, key: 'fixture-key', clock: () => NOW, verify: async () => PRICE,
+const daily = (offsets, gain) => offsets.map(back => ({ num: gain, dateKey: new Date(NOW + 8 * HOUR * 3 - back * DAY).toISOString().slice(0, 10) }));
+function setup(store, { fansByAuthor = {}, userFailure = null, square = [], curves = {} } = {}) {
+  const userCalls = []; const pgyCalls = [];
+  // The quote is re-verified whenever it expires, so a later round in the same fixture gets a fresh one.
+  const deps = { store, config: base, key: 'fixture-key', clock: () => NOW,
+    verify: async (_fetcher, now = NOW) => ({ ...PRICE, verifiedAt: now - 1000, expiresAt: now + 3600000 }),
     generate: async () => JSON.stringify({ verdict: 'cooking', evidence: '加水搅匀', evidenceSource: 'desc' }),
-    makeProvider: options => new Provider({ ...options, fetcher: async url => {
+    makeProvider: opts => new Provider({ ...opts, fetcher: async (url, options) => {
       const u = new URL(url); const kind = u.pathname.split('/').at(-1);
       if (kind === 'get_creator_hot_inspiration_feed') return response({ items: [] });
       if (kind === 'get_creator_inspiration_feed') return response({ inspirations: [] });
       if (kind === 'search_notes') return response({ items: [{ note: raw(1) }] });
       if (kind === 'get_image_note_detail') return response([{ note_list: [raw(1)] }]);
+      // Sources the first round remembered are answered empty: this file is about the rising board, not discovery.
+      if (['get_user_posted_notes', 'get_user_faved_notes', 'get_topic_feed'].includes(kind)) return response({ notes: [] });
+      if (kind === 'get_blogger_list') { pgyCalls.push('list'); return response({ kols: square, total: 5000 }); }
+      if (kind === 'get_blogger_fans_history') { const id = JSON.parse(options?.body || '{}').user_id; pgyCalls.push(id);
+        return response({ list: curves[id] || [] }); }
       if (kind === 'get_user_info') {
         const user = u.searchParams.get('user_id'); userCalls.push(user);
         if (userFailure && userFailure.user === user) return new Response('', { status: userFailure.status });
@@ -38,47 +46,77 @@ function setup(store, { fansByAuthor = {}, userFailure = null } = {}) {
       }
       throw Error('UNEXPECTED_REQUEST');
     } }) };
-  return { deps, userCalls };
+  return { deps, userCalls, pgyCalls };
 }
 async function run(deps) { let result; for (let i = 0; i < 8; i++) { result = await runTick(deps); if (result.status !== 'running') break; } return result; }
 
-test('a regular round re-checks stale authors after its candidates and publishes accounts that gained a thousand followers', async () => {
+const kol = (n, fans, patch = {}) => ({ userId: id(n), name: `作者${n}`, redId: `${n}`, location: '上海', fansNum: fans,
+  fans30GrowthRate: 300, clickMidNum: 1000, interMidNum: 100, contentTags: [{ taxonomy1Tag: '美食', taxonomy2Tags: ['美食展示'] }], ...patch });
+const curve = gains => gains.map((num, i) => ({ num, dateKey: new Date(NOW + 8 * HOUR - (gains.length - 1 - i) * DAY).toISOString().slice(0, 10) }));
+
+test('the day\'s rising board comes from the blogger square, keeping accounts that grew a tenth in seven days', async () => {
   const store = new MemoryStore();
-  await seed(store, [
-    { authorId: id(201), author: '涨粉号', fans: 4000, at: NOW - 3 * DAY },
-    { authorId: id(202), author: '平稳号', fans: 8000, at: NOW - 2 * DAY },
-    { authorId: id(203), author: '刚看过', fans: 500, at: NOW - 2 * HOUR }
-  ]);
-  const { deps, userCalls } = setup(store, { fansByAuthor: { [id(201)]: 5300, [id(202)]: 8200 } });
+  const square = [kol(301, 54739), kol(302, 200000), kol(303, 4000)];
+  const curves = { [id(301)]: curve([131, 125, 157, 144, 341, 20682, 8460]),
+    [id(302)]: curve([100, 90, 120, 80, 110, 95, 105]),  // 700 followers on 200k: below both bars
+    [id(303)]: curve([10, 10, 10, 20, 30, 40, 50]) };    // 170 followers: rate is high, the floor is not met
+  const { deps, pgyCalls } = setup(store, { square, curves });
   const result = await run(deps);
   assert.ok(['complete', 'partial'].includes(result.status), result.status);
-  // The selected work's own author, then the two stale tracked authors; the author seen two hours ago is left alone.
-  assert.deepEqual(userCalls, [id(101), id(201), id(202)]);
+  // One list request, then one curve per candidate the square returned.
+  assert.deepEqual(pgyCalls, ['list', id(301), id(302), id(303)]);
   const snapshot = await readSnapshot(store, result.snapshotId);
-  assert.equal(snapshot.boards.engage, 1); assert.equal(snapshot.boards.rising, 1);
-  assert.deepEqual(snapshot.accounts.map(a => [a.authorId, a.author, a.fansBefore, a.fans, a.fansDelta, a.spanHours]), [[id(201), '涨粉号', 4000, 5300, 1300, 72]]);
+  assert.equal(snapshot.boards.rising, 1);
+  const [account] = snapshot.accounts;
+  assert.deepEqual([account.authorId, account.fansDelta, account.fansBefore, account.gainRate, account.source],
+    [id(301), 30040, 24699, 1.216, 'pgy']);
+  // The spike day is what makes the account worth studying: that is when its content broke out.
+  assert.equal(account.spikeGain, 20682);
+  assert.match(account.spikeDate, /^\d{4}-\d{2}-\d{2}$/);
   const round = await store.get('dfp_rounds', '20260912-0900');
-  assert.deepEqual(round.coverage.rising, { rechecked: 2, queued: 2, published: 1 });
-  // Re-checks are ordinary inspection requests on the same round ledger and stay inside its cap.
-  assert.ok(round.calls <= 50);
-  const index = await store.get('dfp_results', INDEX_ID);
-  assert.equal(index.authors[id(201)].gain, 1300);
-  // The selected work's own author is now tracked, with the follower count the lookup returned.
-  assert.deepEqual((await store.get('dfp_results', historyId(id(101)))).points.map(p => p.fans), [100]);
-  assert.equal((await store.get('dfp_results', `rising_published_${id(201)}`)).snapshotId, snapshot.id);
+  assert.equal(round.coverage.rising.source, 'pgy');
+  assert.equal(round.coverage.rising.published, 1);
 });
 
-test('an account is not recommended twice within seven days and a failed re-check is skipped, not fatal', async () => {
+test('the square is bought once a day: a later round republishes the stored board without paying again', async () => {
   const store = new MemoryStore();
-  await seed(store, [{ authorId: id(201), author: '涨粉号', fans: 4000, at: NOW - 3 * DAY }, { authorId: id(202), author: '出错号', fans: 8000, at: NOW - 2 * DAY }]);
-  await store.put('dfp_results', `rising_published_${id(201)}`, { snapshotId: 'earlier', at: NOW - 2 * DAY });
-  const { deps, userCalls } = setup(store, { fansByAuthor: { [id(201)]: 9000 }, userFailure: { user: id(202), status: 404 } });
-  const result = await run(deps);
-  assert.ok(['complete', 'partial'].includes(result.status), result.status);
-  assert.deepEqual(userCalls, [id(101), id(201), id(202)]);
+  const square = [kol(301, 54739)];
+  const curves = { [id(301)]: curve([131, 125, 157, 144, 341, 20682, 8460]) };
+  const first = setup(store, { square, curves });
+  await run(first.deps);
+  assert.deepEqual(first.pgyCalls, ['list', id(301)]);
+  const later = setup(store, { square, curves });
+  later.deps.clock = () => Date.parse('2026-09-12T12:02:00+08:00');
+  let result; for (let i = 0; i < 8; i++) { result = await runTick(later.deps); if (result.status !== 'running') break; }
+  assert.ok(['complete', 'partial'].includes(result.status), JSON.stringify(result));
+  assert.deepEqual(later.pgyCalls, []);
   const snapshot = await readSnapshot(store, result.snapshotId);
-  assert.equal(snapshot.boards.rising, 0); assert.deepEqual(snapshot.accounts, []);
-  assert.deepEqual((await store.get('dfp_rounds', '20260912-0900')).coverage.rising, { rechecked: 1, queued: 2, published: 0 });
+  assert.equal(snapshot.accounts[0].authorId, id(301));
+});
+
+test('a square that cannot be read leaves the round publishing, and our own observations still stand in', async () => {
+  const store = new MemoryStore();
+  await seed(store, [{ authorId: id(201), author: '涨粉号', fans: 4000, at: NOW - 3 * DAY },
+    { authorId: id(201), author: '涨粉号', fans: 5000, at: NOW - 2 * HOUR }]);
+  const { deps, pgyCalls } = setup(store, { square: [] });
+  deps.makeProvider = opts => new Provider({ ...opts, fetcher: async url => {
+    const u = new URL(url); const kind = u.pathname.split('/').at(-1);
+    if (kind === 'get_blogger_list') { pgyCalls.push('list'); return new Response('', { status: 500 }); }
+    if (kind === 'search_notes') return response({ items: [{ note: raw(1) }] });
+    if (kind === 'get_image_note_detail') return response([{ note_list: [raw(1)] }]);
+    if (kind === 'get_creator_hot_inspiration_feed') return response({ items: [] });
+    if (kind === 'get_creator_inspiration_feed') return response({ inspirations: [] });
+    if (kind === 'get_user_info') return response({ fans: 100 });
+    throw Error('UNEXPECTED_REQUEST');
+  } });
+  const result = await run(deps);
+  assert.equal(result.status, 'partial');
+  const round = await store.get('dfp_rounds', '20260912-0900');
+  assert.ok(round.coverage.gaps.includes('RISING_UNAVAILABLE'));
+  // The observed path fills in: the seeded account gained 1,000 on 4,000 across more than twelve hours.
+  const snapshot = await readSnapshot(store, result.snapshotId);
+  assert.equal(snapshot.accounts[0].source, 'observed');
+  assert.equal(snapshot.accounts[0].fansDelta, 1000);
 });
 
 test('the 06:00 sweep neither re-checks authors nor publishes accounts', async () => {

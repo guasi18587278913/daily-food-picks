@@ -139,6 +139,26 @@ function normalizeNote(raw, { source = 'search', fetchedAt = Date.now(), authorI
       && !/(?:[.。]{3,}|…+)\s*$/.test(desc) && !/(?:[.。]{3,}|…+)\s*$/.test(title),
     source, fetchedAt: new Date(fetchedAt).toISOString(), ...(topics.length ? { topics } : {}), ...(media ? { media } : {}) };
 }
+const positive = value => Number.isFinite(value) && value >= 0 ? value : null;
+// One blogger row out of about 140 fields: identity, the follower count and the growth the square ranked by.
+function normalizeBlogger(raw) {
+  if (!raw || typeof raw !== 'object' || !ID.test(raw.userId || '')) return null;
+  const tags = (Array.isArray(raw.contentTags) ? raw.contentTags : []).slice(0, 6)
+    .map(t => text(t?.taxonomy1Tag, 40)).filter(Boolean);
+  return { authorId: raw.userId, author: text(raw.name, 120), redId: text(raw.redId, 40), location: text(raw.location, 40),
+    fans: metric(raw.fansNum), growthRate30: positive(raw.fans30GrowthRate), readMedian: metric(raw.clickMidNum),
+    interactionMedian: metric(raw.interMidNum), tags: [...new Set(tags)] };
+}
+// The daily-increment curve: one point per day, oldest first.
+function normalizeFansHistory(inner) {
+  const rows = Array.isArray(inner.list) ? inner.list : null;
+  if (!rows) throw error('PROVIDER_SCHEMA');
+  const points = rows.slice(0, 90).map(row => ({ date: text(row?.dateKey, 10), gain: Number.isSafeInteger(row?.num) ? row.num : null }))
+    .filter(p => /^\d{4}-\d{2}-\d{2}$/.test(p.date) && p.gain !== null)
+    .sort((a, b) => a.date.localeCompare(b.date));
+  if (rows.length && !points.length) throw error('PROVIDER_SCHEMA');
+  return points;
+}
 function parseResponse(kind, payload, now, params = {}) {
   const spec = endpoint(kind);
   if (!spec) throw error('INVALID_PARAMETERS');
@@ -155,6 +175,14 @@ function parseResponse(kind, payload, now, params = {}) {
   }
   if (spec.yields === 'signals') return { notes: [], signals: metadataSignals(spec, inner),
     cursor: text(inner.cursor, 300), hasMore: inner.end_flag === false, fetchedAt: now };
+  if (spec.yields === 'bloggers') {
+    const rows = spec.rows(inner);
+    if (!Array.isArray(rows)) throw error('PROVIDER_SCHEMA');
+    const bloggers = rows.slice(0, 20).map(normalizeBlogger).filter(Boolean);
+    if (rows.length && !bloggers.length) throw error('PROVIDER_SCHEMA');
+    return { bloggers, fetchedAt: now };
+  }
+  if (spec.yields === 'fans_history') return { authorId: params.user_id, points: normalizeFansHistory(inner), fetchedAt: now };
   const rows = spec.rows(inner);
   if (!Array.isArray(rows)) throw error('PROVIDER_SCHEMA');
   const notes = rows.map(row => normalizeNote(row?.note_info || row?.note || row,
@@ -169,6 +197,8 @@ function validateParams(kind, params) {
   const spec = endpoint(kind);
   if (!spec || !params || typeof params !== 'object' || Array.isArray(params)
     || Object.keys(params).some(k => !spec.params.includes(k)) || !spec.accepts(params)) throw error('INVALID_PARAMETERS');
+  // A POST body carries the small nested filter objects its own `accepts` already pinned down; bound its size instead.
+  if (spec.method === 'POST') { if (JSON.stringify(params).length > 2000) throw error('INVALID_PARAMETERS'); return; }
   if (Object.values(params).some(v => !['string', 'number'].includes(typeof v) || String(v).length > 500)) throw error('INVALID_PARAMETERS');
 }
 async function readLimited(response, max = 6 * 1024 * 1024) {
@@ -265,9 +295,13 @@ class Provider {
       // Persist only status numbers; response messages may contain private data.
       const diagnostics = { httpStatus: null, providerCode: null, providerDataCode: null };
       try {
-        const url = new URL(endpoint(kind).path, BASE);
-        Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
-        const response = await this.fetcher(url, { headers: { Authorization: `Bearer ${this.key}` },
+        const spec = endpoint(kind);
+        const url = new URL(spec.path, spec.base || BASE);
+        const post = spec.method === 'POST';
+        if (!post) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
+        const response = await this.fetcher(url, {
+          ...(post ? { method: 'POST', body: JSON.stringify(params) } : {}),
+          headers: { Authorization: `Bearer ${this.key}`, ...(post ? { 'Content-Type': 'application/json' } : {}) },
           signal: AbortSignal.timeout(options.requireAuthorProfile ? 10000 : 40000), redirect: 'error' });
         diagnostics.httpStatus = response.status;
         if (!response.ok) throw error(response.status === 401 || response.status === 403 ? 'PROVIDER_AUTH'
@@ -322,5 +356,5 @@ class Provider {
   }
 }
 
-module.exports = { normalizeNote, parseResponse, validateParams, metric, sourceLink, imageUrl, digest,
+module.exports = { normalizeNote, normalizeBlogger, normalizeFansHistory, parseResponse, validateParams, metric, sourceLink, imageUrl, digest,
   readLimited, verifyPrice, splitResultNotes, Provider, ID, mediaUrl, topicPage };

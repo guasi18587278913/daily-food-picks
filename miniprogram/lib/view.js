@@ -61,7 +61,10 @@ function accountCard(account) {
   const hours = typeof account.spanHours === 'number' && Number.isFinite(account.spanHours) ? account.spanHours : null;
   const span = hours === null ? '观测跨度未知' : hours >= 48 ? `${Math.round(hours / 24)} 天内` : `${hours} 小时内`;
   const rate = typeof account.gainRate === 'number' && Number.isFinite(account.gainRate) ? ` (+${Math.round(account.gainRate * 100)}%)` : '';
-  return { authorId: account.authorId, displayName: account.author || '作者未提供',
+  // The day the account took off is the useful part: that is where its breakout content sits.
+  const spike = /^\d{4}-\d{2}-\d{2}$/.test(account.spikeDate || '') && Number.isFinite(account.spikeGain)
+    ? `${formatTime(`${account.spikeDate}T00:00:00.000Z`)} 单日涨 ${formatMetric(account.spikeGain)}` : '';
+  return { authorId: account.authorId, displayName: account.author || '作者未提供', spikeLabel: spike,
     deltaLabel: `+${formatMetric(account.fansDelta)}${rate}`, spanLabel: span,
     fansLabel: `${formatMetric(account.fansBefore)} → ${formatMetric(account.fans)} 粉丝`,
     observedLabel: `采集于 ${formatTime(account.observedAt, true)}`,

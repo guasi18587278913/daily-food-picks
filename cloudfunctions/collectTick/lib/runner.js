@@ -1,6 +1,7 @@
 'use strict';
 const { ensureAuthorProfile } = require('./author-profiles');
-const { recordFansObservation, markRecheckAttempt, selectRecheck, risingAccounts } = require('./authors');
+const { recordFansObservation, markRecheckAttempt, selectRecheck, risingAccounts,
+  risingFromCurves, readDailyRising, saveDailyRising, PGY } = require('./authors');
 
 const { randomUUID } = require('node:crypto');
 const { claimLease, releaseLease, assertLease, validatePrice } = require('./budget');
@@ -82,6 +83,43 @@ function prioritizeCandidates(rows, round) {
   }
   return [...result, ...queues.other];
 }
+// The blogger square ranks food accounts by thirty-day growth; a follower curve per candidate turns that into the
+// seven-day figures the board publishes. Built once a day: later rounds read the stored result and spend nothing.
+async function buildDailyRising({ store, lease, provider, round, progress, clock }) {
+  if (round.kind !== 'regular' || round.risingSource !== 'pgy' || progress.risingBuilt) return;
+  if (await readDailyRising(store, clock())) { progress.risingBuilt = true; return; }
+  const budget = code => /BUDGET/.test(code || '');
+  let bloggers = [];
+  try {
+    const result = await provider.request('pgy_bloggers', { page_num: 1, page_size: PGY.listSize,
+      column: 'fans30GrowthRate', sort: 'desc', blogger: { content_tag: [PGY.category] }, flags: { exclude_fans_down: true } },
+      { purpose: 'inspection' });
+    bloggers = Array.isArray(result.bloggers) ? result.bloggers : [];
+  } catch (e) {
+    if (['LEASE_EXPIRED', 'PROVIDER_AUTH', 'TICK_LIMIT'].includes(e.code)) throw e;
+    progress.gaps.push(budget(e.code) ? 'RISING_BUDGET' : 'RISING_UNAVAILABLE');
+    progress.risingBuilt = true; return;
+  }
+  const curves = new Map(); let stopped = null;
+  for (const blogger of bloggers.slice(0, PGY.maxCurves)) {
+    if (clock() >= round.closesAt - 30000) { stopped = 'RISING_INCOMPLETE'; break; }
+    try {
+      const curve = await provider.request('pgy_fans_history', { user_id: blogger.authorId, increase_type: 2, date_type: 1 },
+        { purpose: 'inspection' });
+      curves.set(blogger.authorId, curve.points || []);
+    } catch (e) {
+      // Running out of requests in this tick is not a failure: the next tick resumes and the curves already
+      // fetched come back from the six-hour result cache without being charged again.
+      if (['LEASE_EXPIRED', 'PROVIDER_AUTH', 'TICK_LIMIT'].includes(e.code)) throw e;
+      stopped = budget(e.code) ? 'RISING_BUDGET' : 'RISING_INCOMPLETE';
+      if (budget(e.code)) break;
+    }
+  }
+  if (stopped) progress.gaps.push(stopped);
+  const accounts = risingFromCurves(bloggers, curves, clock());
+  await saveDailyRising(store, lease, accounts, { listed: bloggers.length, curves: curves.size, roundId: round.id }, clock());
+  progress.risingBuilt = true;
+}
 async function saveProgress(store, lease, roundId, progress, clock) {
   await store.transaction(async tx => {
     await assertLease(tx, lease, clock());
@@ -116,6 +154,9 @@ const REASONS = {
   VISION_OUTPUT_INVALID: '部分视频的判断结果缺少有效证据，尚未确认。',
   VISION_OUTPUT_TRUNCATED: '部分视频的判断结果未完整返回，尚未确认。',
   VISION_BUDGET: '视频画面复核额度已用完，部分视频尚未确认。',
+  RISING_UNAVAILABLE: '黑马榜单的账号数据暂时取不到，本轮沿用已有结果。',
+  RISING_BUDGET: '黑马榜单的账号数据未取完，额度已用完。',
+  RISING_INCOMPLETE: '黑马榜单只取到部分账号的涨粉曲线。',
   VIDEO_UNAVAILABLE: '部分视频画面无法读取，尚未确认其制作内容。'
 };
 function describeGaps(gaps) {
@@ -143,8 +184,10 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
   const rows = await candidateRows(store, round.id);
   await finalizeStatistics({ store, lease, round, progress, rows, now: clock() });
   const notes = rows.filter(x => x.stage === 'done' && x.note.boards?.length).map(x => x.note);
-  // Rising accounts come from follower history, not from this round's candidates; the sweep publishes today picks only.
-  const accounts = round.kind === 'regular' ? await risingAccounts(store, clock()) : [];
+  // Rising accounts come from the blogger square built earlier today, or from our own follower observations when that
+  // request did not succeed. Either way they are independent of this round's candidates; the sweep publishes none.
+  const accounts = round.kind !== 'regular' ? []
+    : (await readDailyRising(store, clock())) || await risingAccounts(store, clock());
   // Reaching the window end is not a coverage gap when every search and candidate had already finished.
   const workFinished = Array.isArray(progress.candidateIds) && (progress.candidateIndex || 0) >= progress.candidateIds.length;
   const reasonGaps = !reason || (reason === 'WINDOW_ENDED' && workFinished) ? [] : [reason];
@@ -165,7 +208,8 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
     coverage.textRequests = { judgments: progress.aiCalls || 0, retries: progress.aiRetries || 0 };
     coverage.vision = { checked: progress.visionChecked || 0, cacheHits: progress.visionCacheHits || 0 };
   }
-  if (round.kind === 'regular') coverage.rising = { rechecked: progress.rechecked || 0, queued: progress.recheckQueue?.length || 0, published: accounts.length };
+  if (round.kind === 'regular') coverage.rising = { source: accounts[0]?.source === 'pgy' ? 'pgy' : 'observed',
+    rechecked: progress.rechecked || 0, queued: progress.recheckQueue?.length || 0, published: accounts.length };
   // A rejected query does not erase completed searches. Total provider failure or an unavailable
   // classifier still retains the old snapshot; partial discovery can publish an honest zero result.
   const judgmentFailures = ['MODEL_UNAVAILABLE', 'VISION_UNAVAILABLE', 'VISION_OUTPUT_INVALID', 'VISION_OUTPUT_TRUNCATED'];
@@ -283,9 +327,13 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
       }
       if (progress.candidateIndex >= progress.candidateIds.length) {
         if (discovery?.reopen()) { await saveProgress(store, lease, round.id, progress, clock); continue; }
-        // Regular rounds spend leftover room re-observing stale author follower counts for the rising board.
-        // Each re-check is one inspection request on the round's ledger; a budget refusal ends re-checks, never the round.
-        if (round.kind === 'regular' && !progress.recheckDone) {
+        // The rising board is built from the blogger square once a day; a failure there never ends the round.
+        if (round.kind === 'regular' && round.risingSource === 'pgy' && !progress.risingBuilt) {
+          await buildDailyRising({ store, lease, provider, round, progress, clock });
+          await saveProgress(store, lease, round.id, progress, clock); continue;
+        }
+        // Our own follower observations stay as the fallback source, re-checked only when the square gave us nothing.
+        if (round.kind === 'regular' && !progress.recheckDone && !(await readDailyRising(store, clock()))?.length) {
           if (!Array.isArray(progress.recheckQueue)) {
             progress.recheckQueue = await selectRecheck(store, clock()); progress.recheckIndex = 0;
             await saveProgress(store, lease, round.id, progress, clock);
