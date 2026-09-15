@@ -48,7 +48,12 @@ async function extractFrames(media, { fetcher = fetch, execFile = execDefault, t
   await fs.chmod(directory, 0o700);
   try {
     const videoPath = path.join(directory, 'input.mp4');
-    const downloadedBytes = await download(media, videoPath, fetcher);
+    let downloadedBytes;
+    try { downloadedBytes = await download(media, videoPath, fetcher); }
+    catch (e) {
+      if (typeof e.code === 'string' && e.code.startsWith('VIDEO_')) throw e;
+      fail(['TimeoutError', 'AbortError'].includes(e.name) ? 'VIDEO_DOWNLOAD_TIMEOUT' : 'VIDEO_DOWNLOAD_FAILED');
+    }
     const deadline = Date.now() + Math.min(processTimeoutMs, 25000);
     async function run(binary, args) {
       const remaining = deadline - Date.now(); if (remaining <= 0) fail('VIDEO_PROCESS_TIMEOUT');

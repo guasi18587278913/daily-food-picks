@@ -138,3 +138,26 @@ test('invalid visual evidence retains the old snapshot and preserves safe attemp
  const row=await x.store.get('dfp_candidates',`20260912-0900_${id(1)}`);assert.equal(row.errorCode,'VISION_OUTPUT_INVALID');assert.equal(row.outcome,'incomplete');assert.equal(row.visualDiagnostics.validationIssue,'EVIDENCE_MISSING');assert.equal(row.visualDiagnostics.httpStatus,200);assert.equal(row.visualDiagnostics.attemptId,'vision_'+'a'.repeat(48));
  const round=await x.store.get('dfp_rounds','20260912-0900');assert.match(round.partialReason,/缺少有效证据/);assert.doesNotMatch(round.partialReason,/暂不可用/);
 });
+test('refill inspects new cooking content after rejecting the first batch without resetting spent calls',async()=>{
+ const store=new MemoryStore(),first=Array.from({length:12},(_,i)=>raw(i+1,{title:'餐厅探店'+(i+1),desc:'我在餐厅吃饭，没做菜。'}));
+ const good=raw(30,{title:'蒸蛋做法',desc:'鸡蛋2个，加水搅匀，蒸十分钟。'});let modelCalls=0,searches=0;
+ const deps={store,config:{...base,budgetTier:'expanded250',dailyCalls:250,dailyMicroUsd:2500000,sweepCalls:100,vision:{...base.vision,enabled:false}},key:'fixture-key',clock:()=>NOW,verify:async()=>PRICE,
+  generate:async messages=>{modelCalls++;const n=JSON.parse(messages[1].content);return JSON.stringify(n.title.startsWith('餐厅探店')?{verdict:'not_cooking',evidence:'在餐厅吃饭'}:{verdict:'cooking',evidence:'加水搅匀'});},
+  makeProvider:options=>new Provider({...options,fetcher:async url=>{const u=new URL(url),kind=u.pathname.split('/').at(-1);
+   if(kind==='search_notes'){searches++;return response({items:(modelCalls>=12?[good]:first).map(note=>({note}))});}
+   if(kind==='get_creator_hot_inspiration_feed')return response({items:[]});if(kind==='get_creator_inspiration_feed')return response({inspirations:[]});
+   if(kind==='get_video_note_detail'){const n=[...first,good].find(n=>n.id===u.searchParams.get('note_id'));return response([{note_list:[n]}]);}
+   if(kind==='get_user_info')return response({fans:100,share_link:'https://www.xiaohongshu.com/user/profile/'+good.user.userid+'?xsec_token=sample&xsec_source=app_share'});
+   throw Error('UNEXPECTED_REQUEST');
+  }})};
+ let result;for(let i=0;i<8;i++){result=await runTick(deps);if(result.status!=='running')break;}
+ assert.ok(['complete','partial'].includes(result.status));const snapshot=await store.get('dfp_snapshots',result.snapshotId);assert.equal(snapshot.boards.week,1);
+ const round=await store.get('dfp_rounds','20260912-0900');assert.ok(round.progress.discovery.refillPasses>=1);assert.ok(round.calls>12);assert.ok(round.calls<=50);assert.equal(round.progress.discovery.pendingCandidateCount,0);assert.equal(round.progress.candidateIds.length,13);assert.equal(new Set(round.progress.candidateIds).size,13);assert.ok(searches>1);assert.equal(modelCalls,13);
+});
+test('refill ordering preserves a missing queued ID instead of silently deleting it',async()=>{
+ const x=setup();x.deps.config={...base,budgetTier:'expanded250',dailyCalls:250,dailyMicroUsd:2500000,sweepCalls:100,vision:{...base.vision,enabled:false}};
+ const {scheduledRound}=require('../cloudfunctions/collectTick/lib/config'),round=scheduledRound(NOW,x.deps.config);
+ const progress={candidateIds:[id(1),id(2)],candidateIndex:1,aiCalls:0,gaps:[],successfulSearches:0,discovery:{jobs:[],index:0,done:true,refillNeedsOrdering:true,candidateCount:2,pendingCandidateCount:1,freshContent:0,successfulContent:0,successfulMetadata:0}};
+ await x.store.put('dfp_rounds',round.id,{status:'running',definition:round,progress,calls:0,microUsd:0});await x.store.put('dfp_candidates',round.id+'_'+id(1),{roundId:round.id,stage:'skipped',outcome:'rejected_content',note:{noteId:id(1),authorId:id(101)}});await x.store.put('dfp_state','latest',{snapshotId:'old'});
+ assert.equal((await runTick(x.deps)).status,'failed');assert.deepEqual((await x.store.get('dfp_rounds',round.id)).progress.candidateIds,[id(1),id(2)]);assert.equal((await x.store.get('dfp_state','latest')).snapshotId,'old');
+});

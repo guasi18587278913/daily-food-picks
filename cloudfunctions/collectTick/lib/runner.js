@@ -243,7 +243,19 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
         if (ordered.length > 40) progress.gaps.push('CANDIDATE_CAP');
         await saveProgress(store, lease, round.id, progress, clock);
       }
-      if (progress.candidateIndex >= progress.candidateIds.length) return await conclude({ store, lease, round, progress, clock });
+      if (progress.discovery?.refillNeedsOrdering) {
+        const prefix = progress.candidateIds.slice(0, progress.candidateIndex);
+        const remaining = new Set(progress.candidateIds.slice(progress.candidateIndex));
+        const rows = (await candidateRows(store, round.id)).filter(row => remaining.has(row.note.noteId));
+        if (rows.length !== remaining.size || new Set(rows.map(row => row.note.noteId)).size !== remaining.size) throw error('MISSING_CANDIDATE');
+        progress.candidateIds = [...prefix, ...prioritizeCandidates(rows, round).map(row => row.note.noteId)];
+        progress.discovery.refillNeedsOrdering = false;
+        await saveProgress(store, lease, round.id, progress, clock);
+      }
+      if (progress.candidateIndex >= progress.candidateIds.length) {
+        if (discovery?.reopen()) { await saveProgress(store, lease, round.id, progress, clock); continue; }
+        return await conclude({ store, lease, round, progress, clock });
+      }
       const noteId = progress.candidateIds[progress.candidateIndex];
       const docId = `${round.id}_${noteId}`;
       const row = await store.get('dfp_candidates', docId);
@@ -396,11 +408,13 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           row.stage = row.note.boards.length ? 'done' : 'skipped';
           row.outcome = row.note.boards.length ? 'accepted' : 'rejected_metrics'; await save(true);
         } else if (['done', 'skipped'].includes(row.stage)) {
+          discovery?.resolved(noteId);
           progress.candidateIndex++; await saveProgress(store, lease, round.id, progress, clock);
         } else throw error('INVALID_STAGE');
       } catch (e) {
         if (['TICK_LIMIT', 'DAILY_BUDGET', 'ROUND_BUDGET', 'VALIDATION_BUDGET', 'SUPPLEMENT_BUDGET', 'PROVIDER_AUTH', 'LEASE_EXPIRED', 'MODEL_UNAVAILABLE', 'AI_CALL_CAP'].includes(e.code)) throw e;
         row.stage = 'skipped'; row.errorCode = 'REQUEST_FAILED'; row.outcome = 'incomplete'; await save();
+        discovery?.resolved(noteId);
         progress.gaps.push('REQUEST_FAILED');
         progress.candidateIndex++; await saveProgress(store, lease, round.id, progress, clock);
       }

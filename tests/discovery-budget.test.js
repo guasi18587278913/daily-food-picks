@@ -72,3 +72,8 @@ test('new dynamic discovery retries use real funds and corrupted candidate count
 test('new allocation never interprets missing or null durable candidate counts as zero',async()=>{
  for(const value of [undefined,null]){const x=await dynamicSetup();const row=await x.store.get('dfp_rounds','20260912-0900');row.progress.discovery.candidateCount=value;await x.store.put('dfp_rounds','20260912-0900',row);const before=structuredClone(x.store.docs);await assert.rejects(reserveAttempt(x.store,x.request),/INVALID_BUDGET/);assert.deepEqual(x.store.docs,before);}
 });
+test('refill budget uses pending candidates while cumulative candidates still remain recorded',async()=>{
+ const x=await dynamicSetup({calls:21,roundCalls:50,candidates:17});const row=await x.store.get('dfp_rounds','20260912-0900');row.definition.discoveryAllocation='candidate-reserve-v2';row.progress.discovery.pendingCandidateCount=0;await x.store.put('dfp_rounds','20260912-0900',row);
+ await reserveAttempt(x.store,x.request);const after=await x.store.get('dfp_rounds','20260912-0900');assert.equal(after.calls,22);assert.equal(after.progress.discovery.candidateCount,17);
+ delete after.progress.discovery.pendingCandidateCount;await x.store.put('dfp_rounds','20260912-0900',after);await assert.rejects(reserveAttempt(x.store,{...x.request,requestKey:'missing-pending'}),/INVALID_BUDGET/);
+});

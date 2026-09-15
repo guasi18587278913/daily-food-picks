@@ -82,7 +82,7 @@ async function reserveAttempt(store, request) {
     if (!round || round.status !== 'running') fail('ROUND_NOT_RUNNING');
     const adaptive = round.definition?.discoveryMode === 'adaptive';
     const discoveryCalls = round.discoveryCalls || 0;
-    const dynamicDiscovery = adaptive && round.definition.discoveryAllocation === 'candidate-reserve-v1';
+    const dynamicDiscovery = adaptive && ['candidate-reserve-v1', 'candidate-reserve-v2'].includes(round.definition.discoveryAllocation);
     if (adaptive) {
       if (dynamicDiscovery) {
         if (round.definition.budgetTier !== 'expanded250' || limits.budgetTier !== 'expanded250'
@@ -114,7 +114,8 @@ async function reserveAttempt(store, request) {
     if ((round.calls || 0) + 1 > Math.min(limits.roundCalls, roundCeiling)) fail('ROUND_BUDGET');
     if (trial && (trial.calls + 1 > limits.validationCalls || trial.microUsd + price.microUsd > limits.validationMicroUsd)) fail('VALIDATION_BUDGET');
     if (dynamicDiscovery && purpose === 'discovery') {
-      const candidates = round.progress?.discovery?.candidateCount;
+      const candidates = round.definition.discoveryAllocation === 'candidate-reserve-v2'
+        ? round.progress?.discovery?.pendingCandidateCount : round.progress?.discovery?.candidateCount;
       if (!integer(candidates, 0, 40)) fail('INVALID_BUDGET');
       // A selected work may need detail, two history pages, and an author share lookup.
       const inspectionReserve = Math.max(12, 4 * Math.min(candidates, 20));
