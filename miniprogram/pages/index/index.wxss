@@ -77,6 +77,9 @@
 .metric{font-size:52rpx;font-weight:700;line-height:64rpx;color:var(--accent);font-variant-numeric:tabular-nums}
 .metric-unit{font-size:24rpx;color:var(--text-2)}
 .comparison{display:block;margin-top:2rpx;font-size:24rpx;line-height:34rpx;color:var(--text-2)}
+.unconfirmed{display:flex;align-items:center;gap:10rpx;margin-top:6rpx}
+.unconfirmed-tag{flex:none;padding:2rpx 12rpx;border:1rpx solid var(--line);border-radius:16rpx;background:var(--placeholder);font-size:22rpx;color:var(--text-3)}
+.unconfirmed-hint{font-size:22rpx;color:var(--text-3)}
 .card-actions{display:flex;align-items:center;justify-content:space-between;margin-top:20rpx;padding:8rpx 12rpx 8rpx 24rpx;border-top:1rpx solid var(--line-soft)}
 .favorite{display:flex;align-items:center;height:88rpx}
 .favorite-pill{display:flex;align-items:center;gap:12rpx;height:72rpx;padding:0 28rpx;border:1rpx solid var(--line);border-radius:36rpx;font-size:28rpx;color:var(--text-2)}

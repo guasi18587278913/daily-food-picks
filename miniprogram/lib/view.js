@@ -21,6 +21,12 @@ function sortNotes(notes, key) {
   });
 }
 // The four boards the user defined on 2026-09-15. Rising lists accounts, not notes, so it carries no sort options.
+// Why a work is only unconfirmed, in the reader's words. An unknown code falls back to the general wording.
+/** @type {Record<string,string>} */
+const UNCONFIRMED_REASON = {
+  video_unreadable: '视频画面没读到', vision_unavailable: '画面复核没完成', vision_budget: '画面复核额度已用完',
+  model_unavailable: '内容判断暂时不可用', steps_in_video: '做法可能在视频里', no_text_evidence: '正文没写做法'
+};
 const BOARD_INFO = {
   today: { name: '今日热榜', subtitle: '近 24 小时 · 至少 1,000 赞', sort: 'ratio', options: [['ratio', '倍数'], ['likes', '点赞'], ['collected', '收藏'], ['comments', '评论']] },
   week: { name: '本周热门', subtitle: '近 7 天 · 至少 1 万赞', sort: 'likes', options: [['likes', '点赞'], ['collected', '收藏'], ['comments', '评论']] },
@@ -36,7 +42,10 @@ function card(note, board, sort, favorite) {
     : board === 'saves' ? `${formatMetric(note.likes)} 赞 · 收藏是点赞的 ${formatMetric(note.collectRatio)} 倍`
     : `${formatMetric(note.collected)} 收藏 · ${formatMetric(note.comments)} 评论`;
   const canOpenSource = canOpenOriginal(note);
+  const unconfirmed = note.contentStatus === 'unconfirmed';
   return { ...note, canOpenSource, sourceActionLabel: '查看内容',
+    unconfirmed, statusLabel: unconfirmed ? '未确认做法' : '',
+    statusHint: unconfirmed ? UNCONFIRMED_REASON[note.contentReason || ''] || '还没确认是做法内容' : '',
     displayTitle: note.title || '未提供标题 · 点开查看内容', big: formatMetric(big), unit, comparison,
     publishedLabel: formatTime(note.publishedAt), typeLabel: note.type === 'video' ? '视频' : '图文', favorite };
 }
@@ -65,9 +74,12 @@ function boards(notes, sorts, hasFavorite, accounts = []) {
         accounts: [...rows].sort((a, b) => b.fansDelta - a.fansDelta || a.authorId.localeCompare(b.authorId)).map(accountCard) };
     }
     const rows = notes.filter(x => x.boards?.includes(key));
+    // Confirmed works lead; unconfirmed ones follow in the same order, so a board never hides them but never leads with them.
+    const ordered = [...sortNotes(rows, sort)].sort((a, b) =>
+      Number(a.contentStatus === 'unconfirmed') - Number(b.contentStatus === 'unconfirmed'));
     return { key, name: info.name, subtitle: info.subtitle, count: rows.length, accounts: [],
       options: info.options.map(([value, label]) => ({ value, label, active: value === sort })),
-      cards: sortNotes(rows, sort).map(x => card(x, key, sort, hasFavorite(x.noteId))) };
+      cards: ordered.map(x => card(x, key, sort, hasFavorite(x.noteId))) };
   });
 }
-module.exports = { formatMetric, formatTime, sortNotes, boards, card, accountCard, BOARD_INFO };
+module.exports = { formatMetric, formatTime, sortNotes, boards, card, accountCard, BOARD_INFO, UNCONFIRMED_REASON };

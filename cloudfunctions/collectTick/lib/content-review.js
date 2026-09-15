@@ -3,7 +3,7 @@ const { judgmentKey, readCache, writeCache } = require('./reuse');
 const { extractFrames, SAMPLER_VERSION } = require('./video');
 const { classifyFrames, verifyVisionPrice, VERSION } = require('./vision');
 const { validatePrice, MODEL } = require('./vision-budget');
-const TEXT_VERSION = 'food-text-20260914-1';
+const TEXT_VERSION = 'food-text-20260915-3-exclusion-cue';
 const DAY = 86400000;
 function identity(note, mode) {
   const version = mode === 'visual' ? `${VERSION}:${SAMPLER_VERSION}` : TEXT_VERSION;

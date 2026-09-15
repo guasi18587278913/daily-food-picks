@@ -26,6 +26,8 @@ interface FoodNote {
   ratio: number | null;
   fanRatio: number | null;
   collectRatio: number | null;
+  contentStatus?: 'confirmed' | 'unconfirmed' | null;
+  contentReason?: string | null;
   baseline: number | null;
   boards: BoardKey[];
   thumbUrl: string | null;

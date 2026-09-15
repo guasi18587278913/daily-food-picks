@@ -8,6 +8,7 @@
       </view>
       <view class="note-body">
         <text class="note-title">{{note.displayTitle}}</text>
+        <view wx:if="{{note.unconfirmed}}" class="unconfirmed"><text class="unconfirmed-tag">{{note.statusLabel}}</text><text class="unconfirmed-hint">{{note.statusHint}}</text></view>
         <view class="note-byline"><text class="note-author">{{note.author || '作者未提供'}}</text><text class="note-date">· {{note.publishedLabel}}</text></view>
         <view class="metric-row"><text class="metric">{{note.big}}</text><text class="metric-unit">{{note.unit}}</text></view>
         <text class="comparison">{{note.comparison}}</text>

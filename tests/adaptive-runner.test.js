@@ -45,11 +45,11 @@ test('successful metadata with no successful content scan retains the old snapsh
  assert.equal((await runTick(x.deps)).status,'failed');
  assert.equal((await x.store.get('dfp_state','latest')).snapshotId,'old');assert.equal(x.counts().visualCalls,0);
 });
-test('visual service failure retains old data and leaves candidates incomplete, not content-rejected',async()=>{
+test('visual service failure retains old data and leaves candidates unconfirmed, not content-rejected',async()=>{
  const x=setup({visionError:true});await x.store.put('dfp_state','latest',{snapshotId:'old'});
  assert.equal((await runTick(x.deps)).status,'failed');assert.equal((await x.store.get('dfp_state','latest')).snapshotId,'old');
  const row=await x.store.get('dfp_candidates',`20260912-0900_${id(1)}`);
- assert.equal(row.outcome,'incomplete');assert.equal(row.note.textJudgment.verdict,'uncertain');
+ assert.equal(row.outcome,'unconfirmed');assert.equal(row.note.textJudgment.verdict,'uncertain');
 });
 test('numeric-ineligible posts never trigger detail, text or visual calls',async()=>{
  const x=setup({items:[raw(1,{liked_count:10})]});assert.equal((await runTick(x.deps)).status,'complete');
@@ -103,7 +103,9 @@ test('text failures with vision disabled preserve the old snapshot and never cla
  const result=await runTick(x.deps);assert.equal(result.status,'failed');assert.equal(textCalls,2);
  assert.equal((await x.store.get('dfp_state','latest')).snapshotId,'old');assert.equal(x.counts().visualCalls,0);
  const rows=await x.store.list('dfp_candidates',{filters:{roundId:'20260912-0900'}});
- assert.ok(rows.every(x=>x.outcome==='incomplete'));
+ // A model outage leaves works unconfirmed, never content-rejected, and the round keeps the previous snapshot.
+ assert.ok(rows.every(x=>['unconfirmed','rejected_metrics'].includes(x.outcome)));
+ assert.ok(rows.every(x=>x.note.contentStatus!=='confirmed'&&x.outcome!=='rejected_content'));
 });
 test('local incomplete-body decisions do not spend text calls or reset a failed model circuit',async()=>{
  const x=setup({items:[raw(1),raw(2,{desc:undefined}),raw(3),raw(4,{desc:undefined}),raw(5)]});let textCalls=0;
@@ -135,14 +137,14 @@ test('invalid visual evidence retains the old snapshot and preserves safe attemp
  const x=setup();await x.store.put('dfp_state','latest',{snapshotId:'old'});
  x.deps.review=async()=>({verdict:'error',reason:'VISION_OUTPUT_INVALID',validationIssue:'EVIDENCE_MISSING',attemptId:'vision_'+'a'.repeat(48),httpStatus:200});
  assert.equal((await runTick(x.deps)).status,'failed');assert.equal((await x.store.get('dfp_state','latest')).snapshotId,'old');
- const row=await x.store.get('dfp_candidates',`20260912-0900_${id(1)}`);assert.equal(row.errorCode,'VISION_OUTPUT_INVALID');assert.equal(row.outcome,'incomplete');assert.equal(row.visualDiagnostics.validationIssue,'EVIDENCE_MISSING');assert.equal(row.visualDiagnostics.httpStatus,200);assert.equal(row.visualDiagnostics.attemptId,'vision_'+'a'.repeat(48));
+ const row=await x.store.get('dfp_candidates',`20260912-0900_${id(1)}`);assert.equal(row.errorCode,'VISION_OUTPUT_INVALID');assert.equal(row.outcome,'unconfirmed');assert.equal(row.visualDiagnostics.validationIssue,'EVIDENCE_MISSING');assert.equal(row.visualDiagnostics.httpStatus,200);assert.equal(row.visualDiagnostics.attemptId,'vision_'+'a'.repeat(48));
  const round=await x.store.get('dfp_rounds','20260912-0900');assert.match(round.partialReason,/缺少有效证据/);assert.doesNotMatch(round.partialReason,/暂不可用/);
 });
 test('refill inspects new cooking content after rejecting the first batch without resetting spent calls',async()=>{
- const store=new MemoryStore(),first=Array.from({length:12},(_,i)=>raw(i+1,{title:'餐厅探店'+(i+1),desc:'我在餐厅吃饭，没做菜。'}));
+ const store=new MemoryStore(),first=Array.from({length:12},(_,i)=>raw(i+1,{title:'餐厅探店'+(i+1),desc:'我在探店吃饭，没做菜。'}));
  const good=raw(30,{title:'蒸蛋做法',desc:'鸡蛋2个，加水搅匀，蒸十分钟。'});let modelCalls=0,searches=0;
  const deps={store,config:{...base,budgetTier:'expanded250',dailyCalls:250,dailyMicroUsd:2500000,sweepCalls:100,vision:{...base.vision,enabled:false}},key:'fixture-key',clock:()=>NOW,verify:async()=>PRICE,
-  generate:async messages=>{modelCalls++;const n=JSON.parse(messages[1].content);return JSON.stringify(n.title.startsWith('餐厅探店')?{verdict:'not_cooking',evidence:'在餐厅吃饭'}:{verdict:'cooking',evidence:'加水搅匀'});},
+  generate:async messages=>{modelCalls++;const n=JSON.parse(messages[1].content);return JSON.stringify(n.title.startsWith('餐厅探店')?{verdict:'not_cooking',evidence:'我在探店吃饭'}:{verdict:'cooking',evidence:'加水搅匀'});},
   makeProvider:options=>new Provider({...options,fetcher:async url=>{const u=new URL(url),kind=u.pathname.split('/').at(-1);
    if(kind==='search_notes'){searches++;return response({items:(modelCalls>=12?[good]:first).map(note=>({note}))});}
    if(kind==='get_creator_hot_inspiration_feed')return response({items:[]});if(kind==='get_creator_inspiration_feed')return response({inspirations:[]});

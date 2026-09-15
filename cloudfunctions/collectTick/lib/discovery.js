@@ -295,7 +295,7 @@ async function finalizeStatistics({ store, lease, round, progress, rows, now }) 
   for (const row of rows) {
     const key = row.origins?.[0]?.key; if (!key) continue;
     const x = item(key); x.candidates++;
-    if (['accepted', 'rejected_content', 'rejected_metrics'].includes(row.outcome)) x.resolved++;
+    if (['accepted', 'unconfirmed', 'rejected_content', 'rejected_metrics'].includes(row.outcome)) x.resolved++;
     if (row.outcome === 'accepted') x.accepted++;
   }
   await store.transaction(async tx => {

@@ -12,9 +12,15 @@ async function previouslyPublished(store, noteId) {
   const ref = await store.get('dfp_candidates', `published_${noteId}`);
   return !!ref && await isPublished(store, ref.snapshotId);
 }
+// Works inspected before the three tiers existed carry only a verdict; a confirmed one still publishes.
+function contentTier(note) {
+  if (['confirmed', 'unconfirmed'].includes(note.contentStatus)) return note.contentStatus;
+  return note.judgment?.verdict === 'cooking' ? 'confirmed' : null;
+}
 function publicNote(note) {
   const keys = ['noteId', 'title', 'author', 'authorId', 'type', 'publishedAt', 'likes', 'collected', 'comments',
-    'shared', 'fans', 'baseline', 'ratio', 'fanRatio', 'collectRatio', 'baselineReason', 'sourceUrl', 'fileId', 'coverUrl', 'boards', 'firstRoundId'];
+    'shared', 'fans', 'baseline', 'ratio', 'fanRatio', 'collectRatio', 'baselineReason', 'contentStatus', 'contentReason',
+    'sourceUrl', 'fileId', 'coverUrl', 'boards', 'firstRoundId'];
   return Object.fromEntries(keys.map(k => [k, note[k] ?? null]));
 }
 const BOARDS = ['today', 'week', 'saves', 'rising'];
@@ -61,8 +67,10 @@ async function publish({ store, lease, round, notes, carriedNotes = [], accounts
   await store.transaction(tx => assertLease(tx, lease, time()));
   const unique = [];
   for (const note of new Map(notes.map(x => [x.noteId, x])).values()) {
-    if (note.judgment?.verdict !== 'cooking' || !note.boards?.length) continue;
-    if (!await previouslyPublished(store, note.noteId)) unique.push({ ...note, firstRoundId: round.id });
+    // Confirmed and unconfirmed works are both published; only an evidenced exclusion never reaches a board.
+    const tier = contentTier(note);
+    if (!tier || !note.boards?.length) continue;
+    if (!await previouslyPublished(store, note.noteId)) unique.push({ ...note, contentStatus: tier, firstRoundId: round.id });
   }
   unique.sort((a, b) => a.noteId.localeCompare(b.noteId));
   // Carried notes were recommended by an earlier snapshot: shown again, but they get no new search rows or dedup references.
@@ -148,4 +156,4 @@ async function storeCover({ store, upload, note, fetcher = fetch, report = () =>
   } catch { return issue(phase === 'upload' ? 'COVER_UPLOAD_FAILED' : 'COVER_DOWNLOAD_FAILED', httpStatus); }
 }
 
-module.exports = { BOARDS, publicNote, publicAccount, splitParts, isPublished, previouslyPublished, readSnapshot, publish, storeCover };
+module.exports = { BOARDS, contentTier, publicNote, publicAccount, splitParts, isPublished, previouslyPublished, readSnapshot, publish, storeCover };

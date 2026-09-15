@@ -34,6 +34,16 @@ function admitsCandidate(round, note) {
 }
 // The saved-to-liked ratio on a search page is free evidence: in the audited 2026-09-14/15 rounds cooking notes had a
 // median ratio of 0.79 (first quartile 0.53) while uncertain and non-cooking notes sat near 0.25.
+// Why a published work is only unconfirmed. Kept to a small set: it is shown to the reader, never parsed back.
+function unconfirmedReason(row) {
+  const code = row.errorCode || row.visualDiagnostics?.code || '';
+  if (/^VIDEO_/.test(code)) return 'video_unreadable';
+  if (/^VISION_.*BUDGET/.test(code)) return 'vision_budget';
+  if (/^VISION_/.test(code)) return 'vision_unavailable';
+  if (row.note.judgment?.verdict === 'error') return 'model_unavailable';
+  if (row.note.type === 'video' && row.note.textJudgment?.verdict !== 'cooking') return 'steps_in_video';
+  return 'no_text_evidence';
+}
 function collectSignal(note) {
   if (!Number.isSafeInteger(note.collected) || !Number.isSafeInteger(note.likes) || note.likes <= 0) return 0;
   const ratio = note.collected / note.likes;
@@ -159,7 +169,10 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
   const judgmentFailures = ['MODEL_UNAVAILABLE', 'VISION_UNAVAILABLE', 'VISION_OUTPUT_INVALID', 'VISION_OUTPUT_TRUNCATED'];
   const serviceFailed = ['PROVIDER_AUTH', ...judgmentFailures].includes(reason)
     || gaps.some(gap => judgmentFailures.includes(gap));
-  if (!notes.length && (!progress.successfulSearches || serviceFailed)) {
+  // Unconfirmed works ride along with confirmed ones. A round that confirmed nothing because the judgment services
+  // were down would be a page of unchecked content, so it keeps the previous snapshot instead.
+  const confirmed = notes.filter(note => note.contentStatus === 'confirmed' || note.judgment?.verdict === 'cooking').length;
+  if ((!notes.length && (!progress.successfulSearches || serviceFailed)) || (!confirmed && serviceFailed)) {
     const status = finishStatus(reason);
     await store.transaction(async tx => {
       await assertLease(tx, lease, clock());
@@ -359,14 +372,17 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           row.note.textJudgment = row.note.judgment;
           const visual = adaptive && round.visionEnabled && config.vision?.enabled && row.note.type === 'video'
             && ['uncertain', 'error'].includes(row.note.judgment.verdict) && admitsCandidate(round, row.note);
-          row.stage = row.note.judgment.verdict === 'cooking' ? 'history' : visual ? 'visual' : 'skipped';
-          if (row.stage === 'skipped') row.outcome = row.note.judgment.verdict === 'not_cooking' ? 'rejected_content' : 'incomplete';
+          // Three tiers, decided on 2026-09-15 after replaying a sweep where every one of thirteen qualifying works was
+          // dropped: a cooking verdict is confirmed, an evidenced exclusion is dropped, and anything merely unproven is
+          // published as unconfirmed. Absence of evidence stops being treated as evidence of absence.
+          row.stage = row.note.judgment.verdict === 'not_cooking' ? 'skipped' : visual ? 'visual' : 'history';
+          if (row.stage === 'skipped') row.outcome = 'rejected_content';
           if (discovery && row.stage === 'history') await discovery.rememberCooking(row.note);
           await save(true);
         } else if (row.stage === 'visual') {
           // Download (35 s across hosts), decode (25 s) and model (35 s) each have their own deadlines; start only with room for the chain.
           if (clock() >= Math.min(deadline, round.closesAt) - 100000) break;
-          if (!config.vision?.enabled) { row.stage = 'skipped'; row.outcome = 'incomplete'; await save(); continue; }
+          if (!config.vision?.enabled) { row.stage = 'history'; await save(); continue; }
           // Detail-attached videos arrive without a stream address; one detail request of their own supplies it.
           // A video whose own detail already lacked a stream is not asked again.
           if (!row.note.media && !row.detailFetched && !row.mediaLookup) { row.mediaLookup = true; row.stage = 'detail'; await save(); continue; }
@@ -383,14 +399,14 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
             if (result.cached) progress.visionCacheHits = (progress.visionCacheHits || 0) + 1;
             else progress.visionChecked = (progress.visionChecked || 0) + 1;
             row.note.judgment = result;
-            row.stage = result.verdict === 'cooking' ? 'history' : 'skipped';
-            row.outcome = result.verdict === 'not_cooking' ? 'rejected_content' : 'incomplete';
+            row.stage = result.verdict === 'not_cooking' ? 'skipped' : 'history';
+            if (row.stage === 'skipped') row.outcome = 'rejected_content';
             if (discovery && row.stage === 'history') await discovery.rememberCooking(row.note);
           } catch (e) {
             if (e.code === 'LEASE_EXPIRED') throw e;
             const gap = ['VISION_OUTPUT_INVALID', 'VISION_OUTPUT_TRUNCATED'].includes(e.code) ? e.code
               : /VISION_.*BUDGET/.test(e.code) ? 'VISION_BUDGET' : /^VIDEO_/.test(e.code) ? 'VIDEO_UNAVAILABLE' : 'VISION_UNAVAILABLE';
-            progress.gaps.push(gap); row.stage = 'skipped'; row.outcome = 'incomplete'; row.errorCode = gap;
+            progress.gaps.push(gap); row.stage = 'history'; row.errorCode = gap;
             const integer = (value, max) => Number.isSafeInteger(value) && value >= 0 && value <= max ? value : null;
             row.visualDiagnostics = {
               code: typeof e.code === 'string' && /^(?:VISION|VIDEO)_[A-Z_]{1,60}$/.test(e.code) ? e.code : 'VISION_UNAVAILABLE',
@@ -413,8 +429,7 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           row.note.judgment = { verdict: 'error', evidence: '', reason: 'interrupted_model' };
           row.note.textJudgment = row.note.judgment;
           row.stage = adaptive && round.visionEnabled && config.vision?.enabled && row.note.type === 'video'
-            && admitsCandidate(round, row.note) ? 'visual' : 'skipped';
-          row.outcome = 'incomplete';
+            && admitsCandidate(round, row.note) ? 'visual' : 'history';
           progress.gaps.push(adaptive && unknownCall ? 'MODEL_UNAVAILABLE' : 'REQUEST_FAILED'); await save(true);
         } else if (row.stage === 'history') {
           if (eligibleBoards(row.note, round.scheduledAt).includes('today')) {
@@ -436,6 +451,8 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           row.note.boards = eligibleBoards(row.note, round.scheduledAt);
           row.note.fanRatio = Number.isSafeInteger(row.note.fans) && row.note.fans > 0 ? Math.round(row.note.likes / row.note.fans * 10) / 10 : null;
           row.note.collectRatio = Number.isSafeInteger(row.note.collected) && row.note.likes > 0 ? Math.round(row.note.collected / row.note.likes * 100) / 100 : null;
+          row.note.contentStatus = row.note.judgment?.verdict === 'cooking' ? 'confirmed' : 'unconfirmed';
+          row.note.contentReason = row.note.contentStatus === 'confirmed' ? null : unconfirmedReason(row);
           row.stage = 'cover'; await save();
         } else if (row.stage === 'cover') {
           // Optional enrichment must not prevent a verified work from reaching publication.
@@ -460,7 +477,9 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
             report: issue => { row.coverIssue = issue; } }) : null;
           if (!row.note.fileId && row.note.coverUrl) progress.gaps.push('COVER_UNAVAILABLE');
           row.stage = row.note.boards.length ? 'done' : 'skipped';
-          row.outcome = row.note.boards.length ? 'accepted' : 'rejected_metrics'; await save(true);
+          // An unconfirmed work reaches the page but is not counted as a source's success.
+          row.outcome = !row.note.boards.length ? 'rejected_metrics'
+            : row.note.contentStatus === 'confirmed' ? 'accepted' : 'unconfirmed'; await save(true);
         } else if (['done', 'skipped'].includes(row.stage)) {
           discovery?.resolved(noteId);
           progress.candidateIndex++; await saveProgress(store, lease, round.id, progress, clock);
