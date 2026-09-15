@@ -72,6 +72,26 @@ test('the 06:00 sweep searches priority keywords as videos only and skips collec
   assert.equal(admitsSource(regularRound, remembered[1]), true);
 });
 
+test('a proven priority keyword runs before untried sources, and every rotating sweep word gets a turn', async () => {
+  const proven = source('search', { keyword: PRIORITY[2], note_type: '视频笔记' }, PRIORITY[2], 'keyword', NOW);
+  const ctx = await start(sweepRound, [proven]);
+  await ctx.store.put('dfp_results', 'source_statistics_v1', { sources: { [proven.key]: { requests: 3, candidates: 6, resolved: 3, accepted: 2, lastUsedAt: NOW } } });
+  await ctx.discovery.init();
+  const jobs = ctx.progress.discovery.jobs;
+  const untriedAuthor = jobs.findIndex(j => j.kind === 'author');
+  assert.equal(jobs[0].params.keyword, PRIORITY[2]);
+  assert.ok(untriedAuthor === -1 || untriedAuthor > jobs.findIndex(j => j.params.keyword === PRIORITY[0]));
+  const rotatingWords = sweepKeywords().filter(w => !PRIORITY.includes(w));
+  const seen = new Set();
+  for (let day = 0; day < rotatingWords.length; day++) {
+    const at = SWEEP_AT + day * 86400000;
+    const daily = await start({ ...sweepRound, id: `sweep-${day}`, scheduledAt: at, closesAt: at + 1800000 });
+    await daily.discovery.init();
+    for (const job of searchJobs(daily.progress)) if (rotatingWords.includes(job.params.keyword)) seen.add(job.params.keyword);
+  }
+  assert.equal(seen.size, rotatingWords.length);
+});
+
 test('regular rounds try each rotating keyword as video, image and collect-sorted video', async () => {
   const ctx = await start(regularRound); await ctx.discovery.init();
   const fixed = searchJobs(ctx.progress).filter(j => j.origin === 'keyword');
@@ -79,7 +99,7 @@ test('regular rounds try each rotating keyword as video, image and collect-sorte
   for (const job of fixed) byKeyword.set(job.params.keyword, [...(byKeyword.get(job.params.keyword) || []), `${job.params.note_type}/${job.params.sort_type}`]);
   assert.equal(byKeyword.size, 2);
   for (const variants of byKeyword.values()) {
-    assert.deepEqual(variants, ['视频笔记/popularity_descending', '普通笔记/popularity_descending', '视频笔记/collect_descending']);
+    assert.deepEqual([...variants].sort(), ['普通笔记/popularity_descending', '视频笔记/collect_descending', '视频笔记/popularity_descending']);
   }
   assert.ok(searchJobs(ctx.progress).every(j => j.params.time_filter === '一周内'));
 });

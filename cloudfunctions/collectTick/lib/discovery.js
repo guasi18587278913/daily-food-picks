@@ -49,8 +49,8 @@ function jobFor(seed, round) {
 }
 function rankSources(rows, statistics, now, explore) {
   const eligible = rows.filter(s => s.expiresAt > now && !(statistics[s.key]?.cooldownUntil > now));
-  // Weak priors: an untried source ranks below any source that has produced candidates and above one that returned
-  // nothing, so exploit rounds prefer proven sources; explore rounds still try the least recently used first.
+  // Weak priors: an untried source ranks below sources whose candidates were accepted or are still pending and above
+  // sources that returned nothing, so exploit rounds prefer proven sources; explore rounds still try the least recently used first.
   const quality = s => {
     const x = statistics[s.key] || {};
     return ((x.accepted || 0) + 0.25) / ((x.resolved || 0) + 2)
@@ -91,7 +91,11 @@ class Discovery {
     const meta = source(explore ? 'inspiration' : 'hot', explore ? { cursor: '', tab: 0, source: 'creator_center' } : { cursor: '' },
       explore ? '创作主题' : '创作热点', explore ? 'inspiration' : 'hot', this.clock());
     const fixed = this.fixedSearchSeeds(day, slot);
-    const ranked = rankSources([...this.sources.values()].filter(s => admitsSource(this.round, s)), stats, this.clock(), explore).slice(0, 12);
+    // Fixed keyword seeds compete with remembered sources on the same evidence instead of waiting at the tail,
+    // so a proven keyword runs early and an untried one still ranks above sources that returned nothing.
+    const pool = new Map();
+    for (const seed of [...fixed, ...this.sources.values()]) if (admitsSource(this.round, seed)) pool.set(seed.key, seed);
+    const ranked = rankSources([...pool.values()], stats, this.clock(), explore).slice(0, 24);
     // A real post query comes before metadata, whose retries could otherwise consume the entire discovery budget.
     // Deliberately narrower than yieldsNotes: faved must pass a publicity check before it can be issued.
     const firstContent = !explore && ranked.find(s => ['search', 'topic', 'author'].includes(s.kind)) || fixed[0];
@@ -104,9 +108,10 @@ class Discovery {
   fixedSearchSeeds(day, slot) {
     const sweep = this.round.kind === 'sweep';
     const words = sweep ? sweepKeywords() : KEYWORDS.groups[(day * 3 + Math.max(0, slot - 1)) % KEYWORDS.groups.length];
-    const rotation = (day * 7 + Math.max(0, slot) * 3) % words.length;
     const priority = sweep ? (KEYWORDS.dailySweep.priorityKeywords || []).slice(0, 12) : [];
     const rotating = words.filter(w => !priority.includes(w));
+    // The daily step of seven is coprime with both list sizes, so every rotating word gets its turn.
+    const rotation = rotating.length ? (day * 7 + Math.max(0, slot) * 3) % rotating.length : 0;
     const count = sweep ? 12 - priority.length : 2;
     const chosen = [...new Set([...priority, ...Array.from({ length: rotating.length ? count : 0 },
       (_, i) => rotating[(rotation + i) % rotating.length])])];
