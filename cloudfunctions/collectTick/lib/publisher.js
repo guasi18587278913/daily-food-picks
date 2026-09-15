@@ -111,7 +111,7 @@ async function publish({ store, lease, round, notes, carriedNotes = [], accounts
   // Search rows are immutable per snapshot. Shared references are committed with the manifest.
   for (const note of unique) {
     const indexId = `${id}_${note.noteId}`;
-    await store.put('dfp_notes', indexId, { snapshotId: id, note: publicNote(note),
+    await store.put('dfp_notes', indexId, { snapshotId: id, track: round.track || DEFAULT_TRACK, note: publicNote(note),
       searchText: [note.title, note.author, note.desc].map(x => typeof x === 'string' ? x : '').join('\n').toLocaleLowerCase() });
   }
   const track = round.track || DEFAULT_TRACK;

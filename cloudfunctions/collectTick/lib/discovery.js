@@ -10,7 +10,7 @@ const { track, DEFAULT_TRACK } = require('./tracks');
 const { ON_TOPIC } = require('./judge');
 // Content jobs return posts for the candidate pool; the rest return leads (signals) or an author profile.
 const yieldsNotes = kind => endpoint(kind)?.yields === 'notes';
-const sourceKey = (kind, params) => `source_${digest([kind, Object.fromEntries(Object.entries(params).sort())]).slice(0, 48)}`;
+const sourceKey = (kind, params, trackKey = DEFAULT_TRACK) => `source_${trackKey}_${digest([kind, Object.fromEntries(Object.entries(params).sort())]).slice(0, 48)}`;
 const hintMatch = (text, hints) => hints.some(h => String(text || '').toLowerCase().includes(h.toLowerCase()));
 // Search variants a keyword is tried with. In the audited 2026-09-14/15 rounds image notes never reached the 24-hour
 // today threshold (0 of 80 results), so the 06:00 sweep searches videos only. Regular rounds add a collect-sorted
@@ -25,6 +25,8 @@ function sweepKeywords(keywords) {
   return [...new Set([...priority, ...keywords.dailySweep.keywords])];
 }
 // A round always names its track; a round stored before tracks existed is a food round.
+const trackKeyOf = round => (track(round?.track) ? round.track : DEFAULT_TRACK);
+const statisticsId = trackKey => `source_statistics_${trackKey}`;
 const keywordsOf = round => track(round?.track || DEFAULT_TRACK).keywords;
 const hintsOf = round => track(round?.track || DEFAULT_TRACK).topicHints;
 // The sweep only publishes today picks; author collections and image-note searches have not produced any.
@@ -37,9 +39,11 @@ function admitsCandidate(round, note) {
   const boards = eligibleBoards(note, round.scheduledAt);
   return round.kind === 'sweep' ? boards.includes('today') : boards.length > 0;
 }
-function source(kind, params, label, origin = kind, now = 0) {
-  return { key: sourceKey(kind, params), kind, params, label: String(label || kind).slice(0, 120), origin,
-    recordType: 'discovery_source', expiresAt: now + POLICY.sourceTtlMs };
+// A remembered source belongs to the track that found it. Ranked sources decide where a round spends its first
+// request, and the food track has weeks of history: a shared pool would send every FDE round to a food author.
+function source(kind, params, label, origin = kind, now = 0, trackKey = DEFAULT_TRACK) {
+  return { key: sourceKey(kind, params, trackKey), kind, params, label: String(label || kind).slice(0, 120), origin,
+    track: trackKey, recordType: 'discovery_source', expiresAt: now + POLICY.sourceTtlMs };
 }
 function jobFor(seed, round) {
   let params = { ...seed.params };
@@ -67,6 +71,7 @@ function rankSources(rows, statistics, now, explore) {
 class Discovery {
   constructor({ store, lease, round, progress, clock = Date.now }) {
     Object.assign(this, { store, lease, round, progress, clock });
+    this.trackKey = trackKeyOf(round);
     this.ids = new Set(); this.pendingIds = new Set(); this.sources = new Map();
   }
   async init() {
@@ -78,7 +83,7 @@ class Discovery {
       for (const row of rows.sort((a, b) => a.note.noteId.localeCompare(b.note.noteId)))
         if (!this.progress.candidateIds.includes(row.note.noteId)) this.progress.candidateIds.push(row.note.noteId);
     }
-    const sources = await this.store.list('dfp_results', { limit: POLICY.maxSources, filters: { recordType: 'discovery_source' } });
+    const sources = await this.store.list('dfp_results', { limit: POLICY.maxSources, filters: { recordType: 'discovery_source', track: this.trackKey } });
     sources.forEach(s => this.sources.set(s.key, s));
     if (this.progress.discovery) {
       this.progress.discovery.candidateCount = this.ids.size;
@@ -86,14 +91,17 @@ class Discovery {
     }
     if (!sources.length) {
       const old = await this.store.list('dfp_notes', { limit: 20, descending: true });
-      for (const { note } of old) if (note?.authorId) await this.remember(source('author', { user_id: note.authorId }, note.author, 'author', this.clock()));
+      for (const { note } of old) if (note?.authorId) await this.remember(source('author', { user_id: note.authorId }, note.author, 'author', this.clock(), this.trackKey));
     }
-    const stats = (await this.store.get('dfp_results', 'source_statistics_v1'))?.sources || {};
+    const stats = (await this.store.get('dfp_results', statisticsId(this.trackKey)))?.sources || {};
     const day = Math.floor(this.round.scheduledAt / 86400000);
-    const slot = [6, 9, 12, 20].indexOf(new Date(this.round.scheduledAt + 8 * 3600000).getUTCHours());
+    // The track's own hours: reading them from a fixed list left every FDE round at slot -1, which froze its
+    // keyword rotation on one group and made every round an explore round.
+    const own = track(this.round?.track || DEFAULT_TRACK);
+    const slot = [own.sweepHour, ...own.regularHours].indexOf(new Date(this.round.scheduledAt + 8 * 3600000).getUTCHours());
     const explore = (day + Math.max(0, slot)) % 4 === 0;
     const meta = source(explore ? 'inspiration' : 'hot', explore ? { cursor: '', tab: 0, source: 'creator_center' } : { cursor: '' },
-      explore ? '创作主题' : '创作热点', explore ? 'inspiration' : 'hot', this.clock());
+      explore ? '创作主题' : '创作热点', explore ? 'inspiration' : 'hot', this.clock(), this.trackKey);
     const fixed = this.fixedSearchSeeds(day, slot);
     // Fixed keyword seeds compete with remembered sources on the same evidence instead of waiting at the tail,
     // so a proven keyword runs early and an untried one still ranks above sources that returned nothing.
@@ -121,7 +129,7 @@ class Discovery {
     const chosen = [...new Set([...priority, ...Array.from({ length: rotating.length ? count : 0 },
       (_, i) => rotating[(rotation + i) % rotating.length])])];
     return chosen.flatMap(keyword => searchVariants(this.round).map(variant =>
-      source('search', { keyword, ...variant }, keyword, 'keyword', this.clock())));
+      source('search', { keyword, ...variant }, keyword, 'keyword', this.clock(), this.trackKey)));
   }
   enqueue(seed, next = false) {
     const state = this.progress.discovery;
@@ -153,7 +161,7 @@ class Discovery {
     try { await recordFansObservation(this.store, this.lease, { authorId, fans: value.fans, at: value.capturedAt ?? value.fetchedAt }, this.clock()); }
     catch (e) { if (e.code === 'LEASE_EXPIRED') throw e; }
     if (value.collectionsPublic !== true) return;
-    const seed = { ...source('faved', { user_id: authorId, cursor: '' }, label || '公开收藏', 'faved', this.clock()),
+    const seed = { ...source('faved', { user_id: authorId, cursor: '' }, label || '公开收藏', 'faved', this.clock(), this.trackKey),
       publicValidatedAt: value.fetchedAt };
     if (await this.remember(seed)) this.enqueue(seed, true);
   }
@@ -161,8 +169,8 @@ class Discovery {
     for (const signal of (result.signals || []).slice().reverse()) {
       if (!hintMatch(signal.label, hintsOf(this.round))) continue;
       let seed;
-      if (signal.pageId) seed = source('topic', { page_id: signal.pageId, sort: this.round.kind === 'sweep' ? 'time' : 'trend' }, signal.label, job.origin, this.clock());
-      else if (signal.label.length <= 60) seed = source('search', { keyword: signal.label, note_type: '不限' }, signal.label, job.origin, this.clock());
+      if (signal.pageId) seed = source('topic', { page_id: signal.pageId, sort: this.round.kind === 'sweep' ? 'time' : 'trend' }, signal.label, job.origin, this.clock(), this.trackKey);
+      else if (signal.label.length <= 60) seed = source('search', { keyword: signal.label, note_type: '不限' }, signal.label, job.origin, this.clock(), this.trackKey);
       if (seed && await this.remember(seed)) this.enqueue(seed, true);
     }
   }
@@ -216,10 +224,10 @@ class Discovery {
   }
   async rememberOnTopic(note, origin = 'author') {
     if (note.judgment?.verdict !== ON_TOPIC) return;
-    await this.remember(source('author', { user_id: note.authorId }, note.author, 'author', this.clock()));
-    await this.remember(source('user', { user_id: note.authorId }, `${note.author}的公开收藏`, 'faved', this.clock()));
+    await this.remember(source('author', { user_id: note.authorId }, note.author, 'author', this.clock(), this.trackKey));
+    await this.remember(source('user', { user_id: note.authorId }, `${note.author}的公开收藏`, 'faved', this.clock(), this.trackKey));
     for (const topic of (note.topics || []).filter(x => hintMatch(x.label, hintsOf(this.round))).slice(0, 2))
-      await this.remember(source('topic', { page_id: topic.pageId, sort: 'trend' }, topic.label, origin, this.clock()));
+      await this.remember(source('topic', { page_id: topic.pageId, sort: 'trend' }, topic.label, origin, this.clock(), this.trackKey));
   }
   async step(provider) {
     const state = this.progress.discovery;
@@ -239,7 +247,7 @@ class Discovery {
         : [...new Set(keywordsOf(this.round).groups.flat())];
       for (const word of words) for (const variant of searchVariants(this.round)) {
         if (state.jobs.length >= POLICY.maxTasks) break;
-        const seed = source('search', { keyword: word, ...variant }, word, 'keyword', this.clock());
+        const seed = source('search', { keyword: word, ...variant }, word, 'keyword', this.clock(), this.trackKey);
         const previousSize = state.jobs.length;
         this.enqueue(seed);
         if (state.jobs.length > previousSize) await this.remember(seed);
@@ -255,7 +263,7 @@ class Discovery {
       if (!Number.isFinite(seed?.publicValidatedAt) || seed.publicValidatedAt > this.clock()
         || this.clock() - seed.publicValidatedAt > 6 * 3600000) {
         job.status = 'publicity_check_required';
-        this.enqueue(source('user', { user_id: job.params.user_id }, job.label, 'faved', this.clock()), true);
+        this.enqueue(source('user', { user_id: job.params.user_id }, job.label, 'faved', this.clock(), this.trackKey), true);
         state.index++; return true;
       }
     }
@@ -269,7 +277,7 @@ class Discovery {
         await this.addNotes(notes, { key: job.sourceKey, type: job.origin, label: job.label });
         state.successfulContent++; if (!result.cached) state.freshContent++;
         if (job.kind === 'faved') for (const note of notes.filter(n => hintMatch(n.title + n.desc, hintsOf(this.round))).slice(0, 2)) {
-          const seed = source('author', { user_id: note.authorId }, note.author, 'faved', this.clock());
+          const seed = source('author', { user_id: note.authorId }, note.author, 'faved', this.clock(), this.trackKey);
           if (await this.remember(seed)) this.enqueue(seed, true);
         }
       } else {
@@ -308,7 +316,7 @@ async function finalizeStatistics({ store, lease, round, progress, rows, now }) 
     await assertLease(tx, lease, now);
     const current = await tx.get('dfp_rounds', round.id);
     if (current?.discoveryStatsApplied) return;
-    const aggregate = await tx.get('dfp_results', 'source_statistics_v1') || { sources: {} };
+    const aggregate = await tx.get('dfp_results', statisticsId(trackKeyOf(round))) || { sources: {} };
     const sources = { ...aggregate.sources };
     for (const [key, change] of Object.entries(delta)) {
       if (!sources[key] && Object.keys(sources).length >= POLICY.maxSources) {
@@ -323,7 +331,7 @@ async function finalizeStatistics({ store, lease, round, progress, rows, now }) 
       if (change.requests && change.errors === change.requests) next.cooldownUntil = now + POLICY.cooldownMs;
       sources[key] = next;
     }
-    await tx.put('dfp_results', 'source_statistics_v1', { recordType: 'discovery_statistics', sources, updatedAt: now });
+    await tx.put('dfp_results', statisticsId(trackKeyOf(round)), { recordType: 'discovery_statistics', track: trackKeyOf(round), sources, updatedAt: now });
     await tx.put('dfp_rounds', round.id, { ...current, discoveryStatsApplied: true });
   });
 }

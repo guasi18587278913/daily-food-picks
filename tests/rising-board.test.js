@@ -153,7 +153,7 @@ test('a board left empty by failed curves is not the day\'s answer: observations
   const result = await run(first.deps);
   // A 5xx is retried once, so a failing curve costs two requests rather than one.
   assert.deepEqual(first.pgyCalls, ['list', id(301), id(301)]);
-  const record = await store.get('dfp_results', `rising_daily_${dayBack(0)}`);
+  const record = await store.get('dfp_results', `rising_daily_food_${dayBack(0)}`);
   assert.deepEqual([record.accounts, record.complete], [[], false]);
   // An empty array is not a board: the round publishes what our own observations know instead of nothing.
   const snapshot = await readSnapshot(store, result.snapshotId);

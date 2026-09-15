@@ -2,7 +2,7 @@
 
 const { shanghaiDay, PRICE_MICRO_USD } = require('./budget');
 const { timingSafeEqual } = require('node:crypto');
-const { TRACKS, TRACK_KEYS, DEFAULT_TRACK, trackForHour } = require('./tracks');
+const { TRACKS, TRACK_KEYS, DEFAULT_TRACK, track, trackForHour } = require('./tracks');
 
 // The food track's own hours, kept as named constants because the supplement and validation rules are written against
 // them. Every track's hours live in tracks.js; these are the ones a manually scheduled round has to avoid.
@@ -36,10 +36,13 @@ function validInstant(value) {
   return month >= 1 && month <= 12 && day >= 1 && day <= new Date(Date.UTC(year, month, 0)).getUTCDate()
     && hour < 24 && minute < 60 && second < 60 && (!match[7] || (Number(match[8]) <= 14 && Number(match[9]) < 60));
 }
-function sweepWindow(now) {
+// Which sweep a round should look to for today's picks. It is the sweep of that round's own track: a round asking
+// about the other track's sweep would publish the other niche's today board.
+function sweepWindow(now, trackKey = DEFAULT_TRACK) {
   const day = shanghaiDay(now);
-  const scheduledAt = Date.parse(`${day}T${pad(SWEEP_HOUR)}:00:00+08:00`);
-  return { id: `${day.replaceAll('-', '')}-${pad(SWEEP_HOUR)}00`, scheduledAt, closesAt: scheduledAt + SWEEP_WINDOW_MINUTES * 60000 };
+  const hour = (track(trackKey) || TRACKS[DEFAULT_TRACK]).sweepHour;
+  const scheduledAt = Date.parse(`${day}T${pad(hour)}:00:00+08:00`);
+  return { id: `${day.replaceAll('-', '')}-${pad(hour)}00`, scheduledAt, closesAt: scheduledAt + SWEEP_WINDOW_MINUTES * 60000 };
 }
 // A validation round sharing a scheduled window would displace that round, which would then never be finalized.
 function overlapsScheduledWindow(start, config) {
@@ -57,7 +60,7 @@ function validateSupplement(config, env) {
   const end = start + REGULAR_WINDOW_MINUTES * 60000;
   const validation = config.validationAt ? Date.parse(config.validationAt) : NaN;
   if (!validInstant(config.supplementAt) || start % 60000 !== 0
-    || (config.sweepCalls && start < sweepWindow(start).closesAt)
+    || (config.sweepCalls && start < sweepWindow(start, DEFAULT_TRACK).closesAt)
     || shanghaiDay(start) !== shanghaiDay(end) || overlapsScheduledWindow(start, config)
     || (Number.isFinite(validation) && start < validation + REGULAR_WINDOW_MINUTES * 60000 && end > validation)) {
     throw error('INVALID_SUPPLEMENT_TIME');

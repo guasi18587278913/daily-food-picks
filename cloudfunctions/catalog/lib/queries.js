@@ -151,7 +151,9 @@ function createCatalog({ store, config, sign = async () => [], clock = Date.now 
       } else if (event.action === 'search') {
         if (typeof event.query !== 'string' || !event.query.trim() || event.query.length > 100) fail('INVALID_ARGUMENT');
         const terms = [...new Set(event.query.trim().toLowerCase().split(/\s+/))];
-        const query = ['search', terms]; let after = decode(event.cursor, query);
+        // Search stays inside the niche the reader is looking at: a search on the AI page must not return recipes.
+        const track = trackOf(event.track);
+        const query = ['search', terms, track]; let after = decode(event.cursor, query);
         const limit = limitOf(event.limit, 50, 30); const notes = []; let more = false; let lastAccepted = after;
         // Bound each read. Sparse matches can return an empty page with a continuation cursor.
         for (let pass = 0; pass < 8; pass++) {
@@ -161,6 +163,8 @@ function createCatalog({ store, config, sign = async () => [], clock = Date.now 
             if (!row.note || !await published(row.snapshotId, seen)) continue;
             const current = await store.get('dfp_candidates', `published_${row.note.noteId}`);
             if (current?.indexId !== row._id || !terms.every(t => (row.searchText || '').includes(t))) continue;
+            // Rows written before the tracks existed carry no track and belong to the food board.
+            if ((row.track || DEFAULT_TRACK) !== track) continue;
             if (notes.length === limit) { more = true; break; }
             notes.push(row.note); lastAccepted = row._id;
           }

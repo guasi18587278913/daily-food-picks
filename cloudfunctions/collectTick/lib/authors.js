@@ -8,7 +8,7 @@ const { ID } = require('./endpoints');
 const HOUR = 3600000, DAY = 86400000;
 // The blogger square is read once a day: one request ranks food accounts by growth, and a few follower curves turn
 // that ranking into the seven-day numbers this board promises, including the day the account actually took off.
-const PGY = Object.freeze({ category: '美食', listSize: 20, maxCurves: 6, maxAccounts: 6 });
+const PGY = Object.freeze({ listSize: 20, maxCurves: 6, maxAccounts: 6 });
 const RULES = Object.freeze({ maxPoints: 40, keepDays: 14, maxTracked: 200, windowDays: 7, minimumGain: 500, minimumRate: 0.1,
   minimumSpanMs: 12 * HOUR, maxPerRound: 10, recheckPerRound: 8, recheckAfterMs: 20 * HOUR, recentNotes: 5, notesPerAccount: 3 });
 const INDEX_ID = 'fans_history_index_v1';
@@ -110,7 +110,8 @@ async function risingAccounts(store, now, limit = RULES.maxPerRound) {
   return accounts;
 }
 const dayKey = (now, back = 0) => new Date(now + 8 * 3600000 - back * DAY).toISOString().slice(0, 10);
-const dailyId = now => `rising_daily_${dayKey(now)}`;
+// Keyed by track as well as day: one track's board must not be served as the other's.
+const dailyId = (now, trackKey = 'food') => `rising_daily_${trackKey}_${dayKey(now)}`;
 // A curve of daily gains becomes the seven-day figures: how many followers, at what rate, and which day carried it.
 // The platform only publishes complete days, so the newest point is yesterday and the week ends there; counting today
 // as well would silently make it a six-day window while the board still promised seven.
@@ -152,14 +153,14 @@ function risingFromCurves(bloggers, curves, now, limit = PGY.maxAccounts) {
 }
 // A day's board says whether it is finished. An empty board left behind by a failed square is not the day's answer:
 // it must not silence our own observations, and a later round has to be free to try again.
-async function readDailyRising(store, now) {
-  const record = await store.get('dfp_results', dailyId(now));
+async function readDailyRising(store, now, trackKey) {
+  const record = await store.get('dfp_results', dailyId(now, trackKey));
   return record && Array.isArray(record.accounts) ? { accounts: record.accounts, complete: record.complete === true } : null;
 }
-async function saveDailyRising(store, lease, accounts, meta, now) {
+async function saveDailyRising(store, lease, accounts, meta, now, trackKey) {
   return store.transaction(async tx => {
     await assertLease(tx, lease, now);
-    await tx.put('dfp_results', dailyId(now), { recordType: 'rising_daily', day: dayKey(now), accounts, ...meta,
+    await tx.put('dfp_results', dailyId(now, trackKey), { recordType: 'rising_daily', track: trackKey || 'food', day: dayKey(now), accounts, ...meta,
       complete: meta?.complete === true, updatedAt: now });
   });
 }

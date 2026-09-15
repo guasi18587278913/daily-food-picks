@@ -1,5 +1,7 @@
 'use strict';
 const { TRACK_KEYS } = require('./tracks');
+// A remembered source is named for the track that found it, so the ledger accepts only that shape.
+const SOURCE_KEY = new RegExp(`^source_(?:${TRACK_KEYS.join('|')})_[a-f0-9]{48}$`);
 
 const { createHash } = require('node:crypto');
 const { endpoint } = require('./endpoints');
@@ -73,7 +75,7 @@ async function reserveAttempt(store, request) {
     || requestKey.length > 300 || !spec
     || !integer(attempt, 1, 2) || !['discovery', 'inspection'].includes(purpose)
     || (discoveryOnly && purpose !== 'discovery')
-    || (request.sourceKey !== undefined && !/^source_[a-f0-9]{48}$/.test(request.sourceKey))) fail('INVALID_REQUEST');
+    || (request.sourceKey !== undefined && !SOURCE_KEY.test(request.sourceKey))) fail('INVALID_REQUEST');
   const day = shanghaiDay(now);
   const id = attemptId(roundId, requestKey, attempt);
   return store.transaction(async tx => {
@@ -110,7 +112,8 @@ async function reserveAttempt(store, request) {
     if (usedCalls + 1 > limits.dailyCalls || usedMoney + price.microUsd > limits.dailyMicroUsd) fail('DAILY_BUDGET');
     if (round.definition?.supplement === true) {
       const kept = round.definition.reservedRegularCalls;
-      if (!integer(kept, 0, expanded ? 150 : 50)) fail('INVALID_BUDGET');
+      // An extra round reserves what every track still has to run today, so the ceiling counts every track.
+      if (!integer(kept, 0, (expanded ? 150 : 50) * TRACK_KEYS.length)) fail('INVALID_BUDGET');
       if (usedCalls + 1 + kept > limits.dailyCalls
         || usedMoney + (1 + kept) * price.microUsd > limits.dailyMicroUsd) fail('SUPPLEMENT_BUDGET');
     }

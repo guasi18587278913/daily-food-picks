@@ -83,7 +83,7 @@ test('source outcomes are applied once and incomplete candidates do not become c
   const rows = [{ origins: [{ key }], outcome: 'accepted' }, { origins: [{ key }], outcome: 'incomplete' }];
   await ctx.store.put('dfp_attempts', 'one', { roundId: ctx.round.id, sourceKey: key, status: 'succeeded' });
   for (let i = 0; i < 2; i++) await finalizeStatistics({ ...ctx, rows, now: NOW });
-  const stats = (await ctx.store.get('dfp_results', 'source_statistics_v1')).sources[key];
+  const stats = (await ctx.store.get('dfp_results', 'source_statistics_food')).sources[key];
   assert.equal(stats.requests, 1); assert.equal(stats.resolved, 1); assert.equal(stats.accepted, 1); assert.equal(stats.candidates, 2);
 });
 test('performance preference still gives an old untried source an exploration opportunity', () => {
@@ -104,11 +104,11 @@ test('recovery appends durable related candidates missing from a previously save
 });
 test('new active sources replace old statistics when the bounded learning history is full',async()=>{
  const ctx=await setup();const sources=Object.fromEntries(Array.from({length:100},(_,i)=>[`old-${i}`,{lastUsedAt:NOW-1000-i,requests:1}]));
- await ctx.store.put('dfp_results','source_statistics_v1',{sources});
+ await ctx.store.put('dfp_results','source_statistics_food',{sources});
  const key=source('author',{user_id:id(1000)},'新作者','author',NOW).key;
  await ctx.store.put('dfp_attempts','new',{roundId:ctx.round.id,sourceKey:key,status:'succeeded'});
  await finalizeStatistics({...ctx,rows:[],now:NOW});
- const stats=(await ctx.store.get('dfp_results','source_statistics_v1')).sources;
+ const stats=(await ctx.store.get('dfp_results','source_statistics_food')).sources;
  assert.equal(Object.keys(stats).length,100);assert.equal(stats[key]?.requests,1);
 });
 test('new sweep topics use time order while accepted old definitions retain their behavior',()=>{

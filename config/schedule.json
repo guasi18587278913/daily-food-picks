@@ -1,5 +1,9 @@
 {
   "timezone": "Asia/Shanghai",
-  "trigger": { "name": "food-picks-timer", "type": "timer", "config": "0 0-30/2 6,9,12,20 * * * *" },
-  "note": "06:00 is the daily today-board sweep: it collects during minutes 0-28 and minute 30 only finalizes. 09/12/20 collect during minutes 0-18, minute 20 only finalizes, and minutes 22-30 exit immediately."
+  "trigger": {
+    "name": "food-picks-timer",
+    "type": "timer",
+    "config": "0 0-30/2 6,7,9,10,12,13,20,21 * * * *"
+  },
+  "note": "06:00 and 07:00 are the daily today-board sweeps (food, then FDE): they collect during minutes 0-28 and minute 30 only finalizes. 09/12/20 (food) and 10/13/21 (FDE) collect during minutes 0-18, minute 20 only finalizes, and minutes 22-30 exit immediately. The two tracks never share an hour, so a wake-up always belongs to exactly one of them."
 }

@@ -2,6 +2,8 @@
 const { createApi, createPoller, shouldFollowLatest } = require('../../lib/api');
 const { createFavorites } = require('../../lib/favorites');
 const { boards, card, formatTime } = require('../../lib/view');
+/** @type {Record<string,string>} */
+const SCHEDULE_LABEL = { food: '每日 06 / 09 / 12 / 20 点更新', fde: '每日 07 / 10 / 13 / 21 点更新' };
 const STORAGE_KEY = 'food-picks:favorites:v2';
 const LEGACY_STORAGE_KEY = 'food-picks:favorites:v1';
 
@@ -11,6 +13,7 @@ Page({
     access: 'checking', role: '', codeInput: '', redeeming: false,
     // Two niches monitored by the same rules; the tab only decides which one's rounds are being read.
     track: 'food', tracks: [{ key: 'food', label: '深夜食堂' }, { key: 'fde', label: 'AI 工程' }],
+    scheduleLabel: '每日 06 / 09 / 12 / 20 点更新',
     mode: 'round', query: '', loading: true, loadingMore: false, message: '',
     statusLabel: '正在查看更新', statusTone: '', roundLabel: '每天更新，给创作找点新意', updatedLabel: '',
     partialReason: '', coverageNotice: '基于当轮关键词发现选题，未覆盖小红书全部内容。',
@@ -180,7 +183,7 @@ Page({
     this._requestId++; this._statusRequestId++;
     this._notes = []; this._accounts = [];
     this._currentRoundId = null; this._latestId = null; this._newestId = null; this._roundCursor = null;
-    this.setData({ track, mode: 'round', query: '', loading: true, loadingMore: false, message: '', newAvailable: false,
+    this.setData({ track, scheduleLabel: SCHEDULE_LABEL[track], mode: 'round', query: '', loading: true, loadingMore: false, message: '', newAvailable: false,
       total: 0, entries: 0, nextCursor: null, rounds: [], roundIndex: 0, olderRounds: false,
       partialReason: '', statusLabel: '正在查看更新', statusTone: '', updatedLabel: '',
       boardViews: boards([], this.data.sorts, () => false, []) });
@@ -228,8 +231,12 @@ Page({
   },
   /** @param {boolean} [append] */
   async loadRounds(append = false) {
+    // Switching niche bumps the request id; a list that arrives after the switch belongs to the previous one.
+    const request = this._requestId;
+    const track = this.data.track;
     try {
-      const result = await this._api('listRounds', { track: this.data.track, limit: 20, cursor: append ? this._roundCursor : null });
+      const result = await this._api('listRounds', { track, limit: 20, cursor: append ? this._roundCursor : null });
+      if (request !== this._requestId || track !== this.data.track) return false;
       const incoming = /** @type {RoundItem[]} */ (result.rounds);
       const all = append ? [...this.data.rounds, ...incoming] : incoming;
       const unique = [...new Map(all.map(x => [x.snapshotId, x])).values()].map(x => ({ ...x, label: `${formatTime(x.scheduledAt, true)} · ${x.count} 篇` }));
@@ -237,7 +244,7 @@ Page({
       this.setData({ rounds: unique, olderRounds: !!result.nextCursor,
         roundIndex: Math.max(0, unique.findIndex(x => x.snapshotId === this._currentRoundId)) });
       return true;
-    } catch (e) { this.showError(e); return false; }
+    } catch (e) { if (request === this._requestId) this.showError(e); return false; }
   },
   async onOlderRounds() { if (await this.loadRounds(true)) wx.showToast({ title: '更早轮次已加入选择列表', icon: 'none' }); },
   /** @param {{detail:{value:string}}} event */
@@ -262,7 +269,7 @@ Page({
     const request = ++this._requestId;
     this.setData({ mode: 'search', loading: !append, loadingMore: append, message: '' });
     try {
-      const result = await this._api('search', { query, limit: 50, cursor: append ? this.data.nextCursor : null });
+      const result = await this._api('search', { track: this.data.track, query, limit: 50, cursor: append ? this.data.nextCursor : null });
       if (request !== this._requestId) return;
       const notes = /** @type {FoodNote[]} */ (result.notes);
       this._notes = [...new Map([...(append ? this._notes : []), ...notes].map(x => [x.noteId, x])).values()];

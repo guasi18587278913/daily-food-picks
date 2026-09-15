@@ -48,12 +48,16 @@ const FDE = Object.freeze({
 
 const TRACKS = Object.freeze({
   food: Object.freeze({ key: 'food', name: '深夜食堂', sweepHour: 6, regularHours: Object.freeze([9, 12, 20]),
-      keywords: FOOD_KEYWORDS, subject: FOOD, vision: true, topicHints: require('../config/discovery.json').foodHints }),
+      keywords: FOOD_KEYWORDS, subject: FOOD, vision: true, risingCategory: '美食',
+    topicHints: require('../config/discovery.json').foodHints }),
   fde: Object.freeze({ key: 'fde', name: 'AI 工程', sweepHour: 7, regularHours: Object.freeze([10, 13, 21]),
     // No visual judge: the frame reader proves a claim by naming a cooking action or a measured quantity it can see,
     // and a screen recording of someone building software offers no equivalent. FDE videos whose steps are only on
     // screen stay unconfirmed, exactly as a food video does when the frame reader is unavailable.
-    keywords: FDE_KEYWORDS, subject: FDE, vision: false,
+        // No blogger square: Pugongying ranks by its own category names and we have not verified the one that covers
+    // this niche. Buying an unverified category would spend money daily on the wrong accounts, so this track's rising
+    // board comes from our own follower observations — the same fallback the food track uses when the square fails.
+    keywords: FDE_KEYWORDS, subject: FDE, vision: false, risingCategory: null,
     topicHints: Object.freeze(['AI', '大模型', '智能体', 'agent', '编程', '开发', '程序员', '技术', '效率工具', 'prompt', 'LLM', 'coding']) })
 });
 const TRACK_KEYS = Object.freeze(Object.keys(TRACKS));

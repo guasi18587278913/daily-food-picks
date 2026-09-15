@@ -75,7 +75,7 @@ test('the 06:00 sweep searches priority keywords as videos only and skips collec
 test('a proven priority keyword runs before untried sources, and every rotating sweep word gets a turn', async () => {
   const proven = source('search', { keyword: PRIORITY[2], note_type: '视频笔记' }, PRIORITY[2], 'keyword', NOW);
   const ctx = await start(sweepRound, [proven]);
-  await ctx.store.put('dfp_results', 'source_statistics_v1', { sources: { [proven.key]: { requests: 3, candidates: 6, resolved: 3, accepted: 2, lastUsedAt: NOW } } });
+  await ctx.store.put('dfp_results', 'source_statistics_food', { sources: { [proven.key]: { requests: 3, candidates: 6, resolved: 3, accepted: 2, lastUsedAt: NOW } } });
   await ctx.discovery.init();
   const jobs = ctx.progress.discovery.jobs;
   const untriedAuthor = jobs.findIndex(j => j.kind === 'author');

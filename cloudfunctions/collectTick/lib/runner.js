@@ -93,8 +93,10 @@ function prioritizeCandidates(rows, round) {
 // seven-day figures the board publishes. Built once a day: later rounds read the stored result and spend nothing.
 async function buildDailyRising({ store, lease, provider, round, progress, clock }) {
   if (round.kind !== 'regular' || round.risingSource !== 'pgy' || progress.risingBuilt) return;
+  // A track with no verified square never buys one; its board comes from our own observations instead.
+  if (!trackOf(round).risingCategory) { progress.risingBuilt = true; return; }
   // A finished board is the day's answer. One left empty by a failed square is not, so a later round retries it.
-  const existing = await readDailyRising(store, clock());
+  const existing = await readDailyRising(store, clock(), round.track);
   if (existing && (existing.complete || existing.accounts.length)) { progress.risingBuilt = true; return; }
   const budget = code => /BUDGET/.test(code || '');
   // Losing the square is one board's problem, never the round's: the fallback still has our own observations.
@@ -102,7 +104,7 @@ async function buildDailyRising({ store, lease, provider, round, progress, clock
   let bloggers = [];
   try {
     const result = await provider.request('pgy_bloggers', { page_num: 1, page_size: PGY.listSize,
-      column: 'fans30GrowthRate', sort: 'desc', blogger: { content_tag: [PGY.category] }, flags: { exclude_fans_down: true } },
+      column: 'fans30GrowthRate', sort: 'desc', blogger: { content_tag: [trackOf(round).risingCategory] }, flags: { exclude_fans_down: true } },
       { purpose: 'inspection' });
     bloggers = Array.isArray(result.bloggers) ? result.bloggers : [];
   } catch (e) {
@@ -132,7 +134,7 @@ async function buildDailyRising({ store, lease, provider, round, progress, clock
   const accounts = risingFromCurves(bloggers, curves, clock());
   // Recorded either way so this round can use what it got, but a board cut short stays open for a later round.
   await saveDailyRising(store, lease, accounts,
-    { listed: bloggers.length, curves: curves.size, roundId: round.id, complete: !stopped }, clock());
+    { listed: bloggers.length, curves: curves.size, roundId: round.id, complete: !stopped }, clock(), round.track);
   progress.risingBuilt = true;
 }
 async function saveProgress(store, lease, roundId, progress, clock) {
@@ -180,7 +182,7 @@ function describeGaps(gaps) {
 // Today picks refresh once at 06:00. Later rounds that day show the same notes again, with any week board they also
 // earned, without recommending them again. A missing, unpublished or unreadable sweep is reported, never shown as empty.
 async function sameDaySweepPicks(store, round) {
-  const sweep = sweepWindow(round.scheduledAt);
+  const sweep = sweepWindow(round.scheduledAt, round.track);
   if (round.kind === 'sweep' || !round.sweepEnabled || round.scheduledAt < sweep.closesAt) return { notes: [], summary: null };
   let record = null;
   const unavailable = errorCode => ({ notes: [], summary: { snapshotId: record?.snapshotId ?? null, count: 0, errorCode } });
@@ -201,7 +203,7 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
   const notes = rows.filter(x => x.stage === 'done' && x.note.boards?.length).map(x => x.note);
   // Rising accounts come from the blogger square built earlier today, or from our own follower observations when that
   // request did not succeed. Either way they are independent of this round's candidates; the sweep publishes none.
-  const daily = round.kind === 'regular' ? await readDailyRising(store, clock()) : null;
+  const daily = round.kind === 'regular' ? await readDailyRising(store, clock(), round.track) : null;
   const accounts = round.kind !== 'regular' ? []
     : daily?.accounts.length ? daily.accounts : await risingAccounts(store, clock());
   // Reaching the window end is not a coverage gap when every search and candidate had already finished.
@@ -241,7 +243,9 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
       const current = await tx.get('dfp_rounds', round.id);
       const update = { status, finishedAt: new Date(clock()).toISOString(), partialReason: describeGaps(gaps) || REASONS.REQUEST_FAILED, coverage };
       await tx.put('dfp_rounds', round.id, { ...current, ...update });
-      await tx.put('dfp_state', 'status', { ...update, roundId: round.id, scheduledAt: new Date(round.scheduledAt).toISOString() });
+      const progressState = { ...update, roundId: round.id, track: round.track, scheduledAt: new Date(round.scheduledAt).toISOString() };
+      await tx.put('dfp_state', `status_${round.track}`, progressState);
+      if (round.track === DEFAULT_TRACK) await tx.put('dfp_state', 'status', progressState);
     });
     return { roundId: round.id, status, reason: reason || 'REQUEST_FAILED' };
   }
@@ -289,7 +293,9 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
         ruleVersion: RULES.version, startedAt: new Date(clock()).toISOString(), scheduledAt: new Date(round.scheduledAt).toISOString(),
         progress, calls: 0, microUsd: 0, day: round.day });
       await tx.put('dfp_state', 'active', { roundId: round.id });
-      await tx.put('dfp_state', 'status', { roundId: round.id, status: 'running', scheduledAt: new Date(round.scheduledAt).toISOString(), finishedAt: null, partialReason: null });
+      const runningState = { roundId: round.id, track: round.track, status: 'running', scheduledAt: new Date(round.scheduledAt).toISOString(), finishedAt: null, partialReason: null };
+      await tx.put('dfp_state', `status_${round.track}`, runningState);
+      if (round.track === DEFAULT_TRACK) await tx.put('dfp_state', 'status', runningState);
     });
     let price = await store.get('dfp_state', 'price');
     try { validatePrice(price, clock()); } catch { price = await verify(undefined, clock()); await store.put('dfp_state', 'price', price); }
@@ -349,7 +355,7 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           await saveProgress(store, lease, round.id, progress, clock); continue;
         }
         // Our own follower observations stay as the fallback source, re-checked only when the square gave us nothing.
-        if (round.kind === 'regular' && !progress.recheckDone && !(await readDailyRising(store, clock()))?.accounts.length) {
+        if (round.kind === 'regular' && !progress.recheckDone && !(await readDailyRising(store, clock(), round.track))?.accounts.length) {
           if (!Array.isArray(progress.recheckQueue)) {
             progress.recheckQueue = await selectRecheck(store, clock()); progress.recheckIndex = 0;
             await saveProgress(store, lease, round.id, progress, clock);
@@ -393,7 +399,7 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           if (!full || full.authorId !== row.note.authorId) throw error('DETAIL_MISMATCH');
           if (discovery) {
             await discovery.addNotes(returned.filter(x => x.noteId !== noteId),
-              { key: sourceKey('related', { note_id: noteId }), type: 'related', label: '详情附带作品' }, true);
+              { key: sourceKey('related', { note_id: noteId }, round.track), type: 'related', label: '详情附带作品' }, true);
             await saveProgress(store, lease, round.id, progress, clock);
           }
           row.note = { ...row.note, ...full, fans: full.fans ?? row.note.fans };
@@ -408,7 +414,7 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           } else row.stage = 'judge';
           await save();
         } else if (row.stage === 'judge') {
-          const cached = adaptive ? await cachedJudgment(store, row.note, 'text', clock(), warning => progress.gaps.push(warning)) : null;
+          const cached = adaptive ? await cachedJudgment(store, row.note, 'text', clock(), warning => progress.gaps.push(warning), round.track) : null;
           if (cached) { row.note.judgment = cached; progress.judgmentCacheHits = (progress.judgmentCacheHits || 0) + 1; }
           else if (adaptive && (progress.textFailureStreak || 0) >= 2) {
             row.note.judgment = { verdict: 'error', evidence: '', reason: 'model_circuit_open' };
@@ -425,7 +431,7 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
             progress.aiRetries = (progress.aiRetries || 0) + Math.max(0, (row.note.judgment.attempts ?? row.note.judgment.diagnostics?.attempts ?? 1) - 1);
             if (callsModel) progress.textFailureStreak = row.note.judgment.verdict === 'error' ? (progress.textFailureStreak || 0) + 1 : 0;
             if (adaptive) {
-              const warning = await cacheJudgment(store, lease, row.note, 'text', row.note.judgment, clock());
+              const warning = await cacheJudgment(store, lease, row.note, 'text', row.note.judgment, clock(), round.track);
               if (warning) progress.gaps.push(warning);
             }
           }
