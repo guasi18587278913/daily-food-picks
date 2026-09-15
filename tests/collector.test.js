@@ -100,7 +100,7 @@ test('long valid Chinese descriptions are split by bytes rather than an assumed 
 });
 test('cooking evidence must be a nonempty source substring; invented recipes and extra tools are rejected', () => {
   const note = { title: '鸡蛋羹', desc: '鸡蛋加温水打散，蒸十分钟。', bodyComplete: true };
-  assert.equal(parseJudgment('{"verdict":"cooking","evidence":"加温水打散"}', note).verdict, 'cooking');
+  assert.equal(parseJudgment('{"verdict":"cooking","evidence":"加温水打散"}', note).verdict, 'on_topic');
   assert.equal(parseJudgment('{"verdict":"cooking","evidence":"加入黄油"}', note).verdict, 'uncertain');
   assert.equal(parseJudgment('{"verdict":"cooking","evidence":""}', note).verdict, 'uncertain');
   assert.equal(parseJudgment('{"verdict":"cooking","evidence":"鸡蛋","tools":["pay"]}', note).verdict, 'uncertain');
@@ -115,7 +115,8 @@ test('incomplete text causes no model call, and model errors have no paid fallba
   assert.equal(JSON.stringify(result).includes('secret'), false);
 });
 test('schedule allocates 17/17/16 and cannot start after the twenty minute window', () => {
-  const config = { dailyCalls: 50, validationCalls: 20 };
+  // The day is shared by two tracks, so 100 approved calls is the 50 this track has always had.
+  const config = { dailyCalls: 100, validationCalls: 20 };
   assert.deepEqual([9, 12, 20].map(h => scheduledRound(Date.parse(`2026-09-12T${h.toString().padStart(2, '0')}:02:00+08:00`), config).roundCalls), [17, 17, 16]);
   assert.equal(scheduledRound(Date.parse('2026-09-12T09:20:00+08:00'), config), null);
   assert.equal(scheduledRound(Date.parse('2026-09-13T00:00:00+08:00'), config), null);

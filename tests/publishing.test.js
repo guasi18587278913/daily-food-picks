@@ -7,7 +7,7 @@ const { publish, previouslyPublished, readSnapshot, storeCover } = require('../c
 
 const ID = '000000000000000000000001';
 const note = { noteId: ID, authorId: '000000000000000000000002', title: '蒸蛋', desc: '鸡蛋加水蒸熟',
-  author: '作者', type: 'normal', likes: 2000, boards: ['today'], judgment: { verdict: 'cooking', evidence: '加水蒸熟' } };
+  author: '作者', type: 'normal', likes: 2000, boards: ['today'], judgment: { verdict: 'on_topic', evidence: '加水蒸熟' } };
 async function setup() {
   const store = new MemoryStore(); const lease = await claimLease(store, { owner: 'worker', now: NOW });
   const round = { id: '20260912-0900', scheduledAt: NOW - 120000, validation: false };

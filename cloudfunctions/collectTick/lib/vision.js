@@ -1,4 +1,5 @@
 'use strict';
+const { ON_TOPIC, OFF_TOPIC, UNCERTAIN } = require('./judge');
 const { createHash } = require('node:crypto');
 const { digest, readLimited } = require('./provider');
 const { PRICE_URL, MODEL, TOTAL_TOKENS, OUTPUT_TOKENS, validatePrice,
@@ -49,7 +50,10 @@ function parseVisualJudgment(raw, frames) {
         if (!result.evidence.some(e => /\d+(?:\.\d+)?\s*(?:克|g|毫升|ml|勺|个|分钟|度)/i.test(e.observation))) return invalid('RECIPE_QUANTITY_MISSING');
       } else return invalid('EVIDENCE_TYPE_INVALID');
     }
-    return { verdict: result.verdict, evidenceType: result.evidenceType || null,
+    // The frame reader answers in the food track's words, the only niche it judges; the verdict is recorded in the
+    // words every track shares, so a visual decision and a text decision read the same downstream.
+    const verdict = result.verdict === 'cooking' ? ON_TOPIC : result.verdict === 'not_cooking' ? OFF_TOPIC : UNCERTAIN;
+    return { verdict, evidenceType: result.evidenceType || null,
       evidence: result.evidence, reason: null, evidenceSource: 'frames', model: MODEL, version: VERSION };
   } catch { return invalid('JSON_INVALID'); }
 }

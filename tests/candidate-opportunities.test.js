@@ -41,7 +41,7 @@ test('the actual request budget leaves room for week inspection before the many 
     time: (NOW - 2 * 86400000) / 1000, liked_count: n === 99 ? 12000 : 600, collected_count: n === 99 ? 100 : 900, comments_count: n === 99 ? 10 : 70, shared_count: n === 99 ? 5 : 30,
     title: n === 99 ? '教你做蒸蛋' : '食材配方齐全', desc: n === 99 ? '好吃！' : '鸡蛋2个，水100毫升，搅拌蒸熟。' });
   const payload = data => new Response(JSON.stringify({ code: 200, data: { success: true, code: 0, data } }));
-  const deps = { store, config: { enabled: true, freeAiConfirmed: true, dailyCalls: 50, dailyMicroUsd: 500000,
+  const deps = { store, config: { enabled: true, freeAiConfirmed: true, dailyCalls: 100, dailyMicroUsd: 1000000,
     validationCalls: 20, validationMicroUsd: 200000, maxAiCallsPerRound: 20 }, key: 'test-key', clock: () => NOW, verify: async () => PRICE,
     generate: async messages => { const note = JSON.parse(messages[1].content); return JSON.stringify({ verdict: 'cooking',
       evidence: note.type === 'video' ? note.title : note.desc, evidenceSource: note.type === 'video' ? 'title' : 'desc' }); },

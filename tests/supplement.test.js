@@ -8,7 +8,7 @@ const { readSnapshot } = require('../cloudfunctions/collectTick/lib/publisher');
 const { MemoryStore, PRICE } = require('./helpers');
 const AT = Date.parse('2026-09-14T13:30:00+08:00');
 const env = { DFP_ENABLED: 'true', DFP_FREE_AI_CONFIRMED: 'true', DFP_TIMER_SECRET: 'a'.repeat(64),
-  DFP_DAILY_CALLS: '150', DFP_DAILY_MICRO_USD: '1500000', DFP_SWEEP_CALLS: '100', DFP_VALIDATION_CALLS: '20',
+  DFP_DAILY_CALLS: '300', DFP_DAILY_MICRO_USD: '3000000', DFP_SWEEP_CALLS: '200', DFP_VALIDATION_CALLS: '20',
   DFP_VALIDATION_MICRO_USD: '200000', DFP_SUPPLEMENT_AT: '2026-09-14T13:30:00+08:00', DFP_SUPPLEMENT_CALLS: '20' };
 const price = { ...PRICE, verifiedAt: AT - 1000, expiresAt: AT + 3600000 };
 
@@ -17,7 +17,8 @@ test('a supplement is off by default and opens one 20-minute non-validation roun
   const round = scheduledRound(AT, config);
   assert.ok(round);
   assert.deepEqual([round.id, round.kind, round.validation, round.supplement, round.roundCalls, round.reservedRegularCalls],
-    ['20260914-1330', 'regular', false, true, 20, 16]);
+    // 13:30 still has food's 20:00 and the FDE 21:00 round ahead of it, both drawing on the same ledger.
+    ['20260914-1330', 'regular', false, true, 20, 32]);
   assert.equal(round.closesAt - round.scheduledAt, 20 * 60000);
   assert.equal(scheduledRound(AT - 1, config), null);
   assert.equal(scheduledRound(AT + 20 * 60000, config), null);
@@ -36,7 +37,7 @@ test('supplement settings reject missing caps, overlaps, cross-day windows and a
 
 test('reserved regular calls follow remaining scheduled rounds without changing their allocations', () => {
   const config = loadConfig(env);
-  for (const [hour, expected] of [[8, 50], [10, 33], [13, 16], [21, 0]]) {
+  for (const [hour, expected] of [[8, 100], [10, 66], [13, 32], [21, 0]]) {
     const at = Date.parse(`2026-09-14T${String(hour).padStart(2, '0')}:30:00+08:00`);
     assert.equal(scheduledRound(at, { ...config, supplementAt: new Date(at).toISOString() }).reservedRegularCalls, expected);
   }
@@ -63,11 +64,11 @@ test('supplements use their own round and daily counters while leaving an exhaus
 });
 
 test('parallel supplement reservations cannot consume the calls kept for 20:00', async () => {
-  const { store, request } = await setup(133);
+  const { store, request } = await setup(267);
   const outcomes = await Promise.allSettled([0, 1].map(i => reserveAttempt(store, { ...request, requestKey: `parallel-${i}` })));
   assert.equal(outcomes.filter(x => x.status === 'fulfilled').length, 1);
   assert.equal(outcomes.filter(x => x.status === 'rejected').length, 1);
-  assert.equal((await store.get('dfp_budgets', '2026-09-14')).calls, 134);
+  assert.equal((await store.get('dfp_budgets', '2026-09-14')).calls, 268);
 });
 
 test('the same request reuses its reservation and regular rounds can still use their reserved capacity', async () => {
@@ -83,7 +84,7 @@ test('the same request reuses its reservation and regular rounds can still use t
 
 test('money reservation protects the later regular run as well as the call count', async () => {
   const { store, request } = await setup(100);
-  await store.put('dfp_budgets', '2026-09-14', { calls: 100, microUsd: 1340000 });
+  await store.put('dfp_budgets', '2026-09-14', { calls: 100, microUsd: 2680000 });
   await assert.rejects(reserveAttempt(store, { ...request, requestKey: 'no-money-left-for-evening' }), /BUDGET/);
   assert.equal((await store.get('dfp_budgets', '2026-09-14')).calls, 100);
 });

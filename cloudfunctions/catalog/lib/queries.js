@@ -1,4 +1,9 @@
 'use strict';
+// The tracks a client may ask for. Kept as a literal list so an unknown value falls back to the food board rather
+// than reaching the store: a track name is user input.
+const TRACK_KEYS = Object.freeze(['food', 'fde']);
+const DEFAULT_TRACK = 'food';
+const trackOf = value => TRACK_KEYS.includes(value) ? value : DEFAULT_TRACK;
 const { authorId, authorNavigationFor } = require('./author-navigation');
 const { capturedNote, contentFor, sourceMediaUrl } = require('./content');
 const { createHash } = require('node:crypto');
@@ -81,18 +86,28 @@ function createCatalog({ store, config, sign = async () => [], clock = Date.now 
       if (!event || typeof event !== 'object') fail('INVALID_ARGUMENT');
       let data;
       if (event.action === 'status') {
-        const latest = await store.get('dfp_state', 'latest');
-        const state = await store.get('dfp_state', 'status');
+        // A client that names no track asks about the food board, which is what 'latest' has always meant.
+        const track = trackOf(event.track);
+        // Before this track has ever published, the food board still lives under the pointer it had when it was the
+        // only one, so the default track falls back to it rather than reporting an empty board.
+        const legacy = track === DEFAULT_TRACK;
+        const latest = await store.get('dfp_state', `latest_${track}`) || (legacy ? await store.get('dfp_state', 'latest') : null);
+        const state = await store.get('dfp_state', `status_${track}`) || (legacy ? await store.get('dfp_state', 'status') : null);
         const available = !!latest && await published(latest.snapshotId, seen);
-        data = { status: state?.status || 'pending', roundId: state?.roundId || null,
+        data = { track, status: state?.status || 'pending', roundId: state?.roundId || null,
           scheduledAt: state?.scheduledAt || null, finishedAt: state?.finishedAt || null, partialReason: state?.partialReason || null,
           revision: available ? latest.revision : null,
           snapshotId: available ? latest.snapshotId : null };
       } else if (event.action === 'listRounds') {
-        const limit = limitOf(event.limit, 20, 10); const query = ['rounds'];
+        const track = trackOf(event.track);
+        const limit = limitOf(event.limit, 20, 10); const query = ['rounds', track];
         const after = decode(event.cursor, query);
-        const rows = await store.list('dfp_snapshots', { descending: true, after, limit: limit + 1, filters: { published: true } });
-        data = { rounds: rows.slice(0, limit).map(x => ({ snapshotId: x.id, scheduledAt: x.scheduledAt,
+        // Snapshots published before the tracks existed carry no track field and are food rounds, so the default
+        // track cannot filter in the store; it drops the other tracks here instead.
+        const rows = await store.list('dfp_snapshots', { descending: true, after, limit: limit + 1,
+          filters: track === DEFAULT_TRACK ? { published: true } : { published: true, track } });
+        const mine = rows.filter(x => (x.track || DEFAULT_TRACK) === track);
+        data = { track, rounds: mine.slice(0, limit).map(x => ({ snapshotId: x.id, scheduledAt: x.scheduledAt,
           finishedAt: x.finishedAt, status: x.status, count: x.count })),
           nextCursor: rows.length > limit ? encode(query, rows[limit - 1]._id) : null };
       } else if (event.action === 'getRound') {

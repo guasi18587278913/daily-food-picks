@@ -6,7 +6,7 @@ const { claimLease } = require('../cloudfunctions/collectTick/lib/budget');
 const { Discovery, source, jobFor, rankSources, admitsSource, sweepKeywords } = require('../cloudfunctions/collectTick/lib/discovery');
 const { validateParams } = require('../cloudfunctions/collectTick/lib/provider');
 const { prioritizeCandidates } = require('../cloudfunctions/collectTick/lib/runner');
-const KEYWORDS = require('../config/keywords.json');
+const KEYWORDS = require('../config/keywords/food.json');
 const id = n => n.toString(16).padStart(24, '0');
 const PRIORITY = KEYWORDS.dailySweep.priorityKeywords;
 const SWEEP_AT = Date.parse('2026-09-16T06:00:00+08:00');
@@ -45,7 +45,7 @@ test('a collect-sorted seed is its own learnable source and keeps the round time
 });
 
 test('sweep keywords start with the audited priority words and never repeat a word', () => {
-  const words = sweepKeywords();
+  const words = sweepKeywords(KEYWORDS);
   assert.deepEqual(words.slice(0, PRIORITY.length), PRIORITY);
   assert.equal(new Set(words).size, words.length);
   assert.ok(KEYWORDS.dailySweep.keywords.every(w => words.includes(w)));
@@ -81,7 +81,7 @@ test('a proven priority keyword runs before untried sources, and every rotating 
   const untriedAuthor = jobs.findIndex(j => j.kind === 'author');
   assert.equal(jobs[0].params.keyword, PRIORITY[2]);
   assert.ok(untriedAuthor === -1 || untriedAuthor > jobs.findIndex(j => j.params.keyword === PRIORITY[0]));
-  const rotatingWords = sweepKeywords().filter(w => !PRIORITY.includes(w));
+  const rotatingWords = sweepKeywords(KEYWORDS).filter(w => !PRIORITY.includes(w));
   const seen = new Set();
   for (let day = 0; day < rotatingWords.length; day++) {
     const at = SWEEP_AT + day * 86400000;

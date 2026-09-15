@@ -9,21 +9,25 @@ const { scheduledRound, sweepWindow, error } = require('./config');
 const { Provider, verifyPrice } = require('./provider');
 const { detailKind } = require('./endpoints');
 const { eligibleBoards, engageRatio, historyBaseline, inWindow } = require('./ranking');
-const { judgeNote, needsTextModel } = require('./judge');
+const { judgeNote, needsTextModel, ON_TOPIC, OFF_TOPIC } = require('./judge');
 const { publish, previouslyPublished, readSnapshot, storeCover } = require('./publisher');
-const KEYWORDS = require('../config/keywords.json');
+
 const RULES = require('../config/rules.json');
 const { Discovery, finalizeStatistics, sourceKey } = require('./discovery');
 const { cachedJudgment, cacheJudgment, reviewVideo } = require('./content-review');
+const { track, DEFAULT_TRACK } = require('./tracks');
+// A round always names its track; one stored before tracks existed is a food round.
+const trackOf = round => track(round?.track || DEFAULT_TRACK);
 
 function searches(round) {
+  const KEYWORDS = trackOf(round).keywords;
   if (round.kind === 'sweep') {
     const sweep = KEYWORDS.dailySweep;
     return sweep.keywords.map(keyword => ({ keyword, note_type: sweep.noteType, page: 1,
       sort_type: 'popularity_descending', time_filter: sweep.timeFilter, source: 'explore_feed', ai_mode: 0 }));
   }
   const day = Math.floor(round.scheduledAt / 86400000);
-  const slot = [9, 12, 20].indexOf(new Date(round.scheduledAt + 8 * 3600000).getUTCHours());
+  const slot = trackOf(round).regularHours.indexOf(new Date(round.scheduledAt + 8 * 3600000).getUTCHours());
   const group = KEYWORDS.groups[(day * 3 + Math.max(0, slot)) % KEYWORDS.groups.length];
   return group.flatMap(keyword => KEYWORDS.noteTypes.map(note_type => ({ keyword, note_type, page: 1,
     sort_type: 'popularity_descending', time_filter: '一周内', source: 'explore_feed', ai_mode: 0 })));
@@ -44,7 +48,7 @@ function unconfirmedReason(row) {
   if (row.note.judgment?.verdict === 'error') return 'model_unavailable';
   // The frames were already read and showed nothing conclusive; saying the steps might be in the video would be false.
   if (row.note.judgment?.evidenceSource === 'frames') return 'frames_inconclusive';
-  if (row.note.type === 'video' && row.note.textJudgment?.verdict !== 'cooking') return 'steps_in_video';
+  if (row.note.type === 'video' && row.note.textJudgment?.verdict !== ON_TOPIC) return 'steps_in_video';
   return 'no_text_evidence';
 }
 function collectSignal(note) {
@@ -52,12 +56,14 @@ function collectSignal(note) {
   const ratio = note.collected / note.likes;
   return ratio >= 0.5 ? 2 : ratio >= 0.3 ? 1 : 0;
 }
-function prioritizeRecipeClues(rows) {
+// Which candidate is worth a request first: a body that already shows the work outranks one that only shows the
+// result. The clues are the track's; the scoring, the banding and the tie-break are shared.
+function prioritizeRecipeClues(rows, clues) {
   const score = row => {
     const body = String(row.note.desc || '').replace(/#[^#]*#/g, ' ');
-    return (/食材|用料|配方|步骤|制作方法/.test(body) ? 2 : 0)
-      + (/\d+(?:\.\d+)?\s*(?:kg|ml|g|克|毫升|个|勺)/i.test(body) ? 1 : 0)
-      + (/教程|做法|自制|怎么做|这样做/.test(row.note.title || '') ? 1 : 0)
+    return (clues.body.test(body) ? 2 : 0)
+      + (clues.measure.test(body) ? 1 : 0)
+      + (clues.title.test(row.note.title || '') ? 1 : 0)
       + collectSignal(row.note);
   };
   const ordered = [];
@@ -69,7 +75,7 @@ function prioritizeRecipeClues(rows) {
   return ordered;
 }
 function prioritizeCandidates(rows, round) {
-  const ordered = prioritizeRecipeClues(rows);
+  const ordered = prioritizeRecipeClues(rows, trackOf(round).subject.clues);
   if (round?.kind !== 'regular' || !Number.isFinite(round.scheduledAt)) return ordered;
   const queues = { week: [], engage: [], today: [], other: [] };
   for (const row of ordered) {
@@ -204,7 +210,7 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
   const gaps = [...new Set([...(progress.gaps || []), ...reasonGaps])];
   const coverage = { keywords: searches(round).map(x => x.keyword).filter((v, i, a) => a.indexOf(v) === i),
     pagesPerQuery: 1, successfulSearches: progress.successfulSearches, candidateCount: progress.candidateIds?.length || rows.length,
-    processed: progress.candidateIndex || 0, gaps, notice: round.kind === 'sweep' ? KEYWORDS.dailySweep.coverageNotice : KEYWORDS.coverageNotice,
+    processed: progress.candidateIndex || 0, gaps, notice: round.kind === 'sweep' ? trackOf(round).keywords.dailySweep.coverageNotice : trackOf(round).keywords.coverageNotice,
     ruleVersion: RULES.version, ...(round.supplement ? { supplement: true } : {}) };
   if (round.supplement) coverage.notice = `临时补跑。${coverage.notice}`;
   if (progress.discovery) {
@@ -227,7 +233,7 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
     || gaps.some(gap => judgmentFailures.includes(gap));
   // Unconfirmed works ride along with confirmed ones. A round that confirmed nothing because the judgment services
   // were down would be a page of unchecked content, so it keeps the previous snapshot instead.
-  const confirmed = notes.filter(note => note.contentStatus === 'confirmed' || note.judgment?.verdict === 'cooking').length;
+  const confirmed = notes.filter(note => note.contentStatus === 'confirmed' || note.judgment?.verdict === ON_TOPIC).length;
   if ((!notes.length && (!progress.successfulSearches || serviceFailed)) || (!confirmed && serviceFailed)) {
     const status = finishStatus(reason);
     await store.transaction(async tx => {
@@ -413,7 +419,7 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
             row.stage = 'judging'; row.textCallReserved = callsModel;
             if (callsModel) progress.aiCalls++;
             await save(true);
-            row.note.judgment = await judgeNote(row.note, generate, { clock, deadline });
+            row.note.judgment = await judgeNote(row.note, generate, { clock, deadline, track: round.track });
             row.textCallReserved = false;
             // Every rate-limit retry is one more free-channel request beyond the reserved judgment; the ledger keeps the count.
             progress.aiRetries = (progress.aiRetries || 0) + Math.max(0, (row.note.judgment.attempts ?? row.note.judgment.diagnostics?.attempts ?? 1) - 1);
@@ -430,14 +436,14 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
               roundId: round.id, noteId, ...row.note.judgment.diagnostics }));
           }
           row.note.textJudgment = row.note.judgment;
-          const visual = adaptive && round.visionEnabled && config.vision?.enabled && row.note.type === 'video'
+          const visual = adaptive && trackOf(round).vision && round.visionEnabled && config.vision?.enabled && row.note.type === 'video'
             && ['uncertain', 'error'].includes(row.note.judgment.verdict) && admitsCandidate(round, row.note);
           // Three tiers, decided on 2026-09-15 after replaying a sweep where every one of thirteen qualifying works was
           // dropped: a cooking verdict is confirmed, an evidenced exclusion is dropped, and anything merely unproven is
           // published as unconfirmed. Absence of evidence stops being treated as evidence of absence.
-          row.stage = row.note.judgment.verdict === 'not_cooking' ? 'skipped' : visual ? 'visual' : 'history';
+          row.stage = row.note.judgment.verdict === OFF_TOPIC ? 'skipped' : visual ? 'visual' : 'history';
           if (row.stage === 'skipped') row.outcome = 'rejected_content';
-          if (discovery && row.stage === 'history') await discovery.rememberCooking(row.note);
+          if (discovery && row.stage === 'history') await discovery.rememberOnTopic(row.note);
           await save(true);
         } else if (row.stage === 'visual') {
           // Download (35 s across hosts), decode (25 s) and model (35 s) each have their own deadlines; start only with room for the chain.
@@ -459,9 +465,9 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
             if (result.cached) progress.visionCacheHits = (progress.visionCacheHits || 0) + 1;
             else progress.visionChecked = (progress.visionChecked || 0) + 1;
             row.note.judgment = result;
-            row.stage = result.verdict === 'not_cooking' ? 'skipped' : 'history';
+            row.stage = result.verdict === OFF_TOPIC ? 'skipped' : 'history';
             if (row.stage === 'skipped') row.outcome = 'rejected_content';
-            if (discovery && row.stage === 'history') await discovery.rememberCooking(row.note);
+            if (discovery && row.stage === 'history') await discovery.rememberOnTopic(row.note);
           } catch (e) {
             if (e.code === 'LEASE_EXPIRED') throw e;
             const gap = ['VISION_OUTPUT_INVALID', 'VISION_OUTPUT_TRUNCATED'].includes(e.code) ? e.code
@@ -488,13 +494,13 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           row.textCallReserved = false;
           row.note.judgment = { verdict: 'error', evidence: '', reason: 'interrupted_model' };
           row.note.textJudgment = row.note.judgment;
-          row.stage = adaptive && round.visionEnabled && config.vision?.enabled && row.note.type === 'video'
+          row.stage = adaptive && trackOf(round).vision && round.visionEnabled && config.vision?.enabled && row.note.type === 'video'
             && admitsCandidate(round, row.note) ? 'visual' : 'history';
           progress.gaps.push(adaptive && unknownCall ? 'MODEL_UNAVAILABLE' : 'REQUEST_FAILED'); await save(true);
         } else if (row.stage === 'history') {
           // Paid enrichment stays with confirmed works: unconfirmed ones now reach the page too, and must not
           // spend the round's remaining calls on an author baseline or a profile link.
-          if (row.note.judgment?.verdict === 'cooking' && eligibleBoards(row.note, round.scheduledAt).includes('today')) {
+          if (row.note.judgment?.verdict === ON_TOPIC && eligibleBoards(row.note, round.scheduledAt).includes('today')) {
             const cacheId = `history_${round.id}_${row.note.authorId}`;
             let history = await store.get('dfp_results', cacheId);
             if (!history || (historyBaseline(row.note, history.notes).baselineReason === 'fewer_than_seven' && history.hasMore && history.cursor && history.pages < 2)) {
@@ -514,7 +520,7 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           row.note.fanRatio = Number.isSafeInteger(row.note.fans) && row.note.fans > 0 ? Math.round(row.note.likes / row.note.fans * 10) / 10 : null;
           row.note.collectRatio = Number.isSafeInteger(row.note.collected) && row.note.likes > 0 ? Math.round(row.note.collected / row.note.likes * 100) / 100 : null;
           row.note.engageRatio = engageRatio(row.note);
-          row.note.contentStatus = row.note.judgment?.verdict === 'cooking' ? 'confirmed' : 'unconfirmed';
+          row.note.contentStatus = row.note.judgment?.verdict === ON_TOPIC ? 'confirmed' : 'unconfirmed';
           row.note.contentReason = row.note.contentStatus === 'confirmed' ? null : unconfirmedReason(row);
           row.stage = 'cover'; await save();
         } else if (row.stage === 'cover') {

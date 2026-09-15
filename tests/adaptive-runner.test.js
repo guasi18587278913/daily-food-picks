@@ -5,7 +5,7 @@ const { runTick } = require('../cloudfunctions/collectTick/lib/runner');
 const { Provider } = require('../cloudfunctions/collectTick/lib/provider');
 const { loadConfig } = require('../cloudfunctions/collectTick/lib/config');
 const id = n => n.toString(16).padStart(24, '0');
-const base = { enabled: true, freeAiConfirmed: true, dailyCalls: 50, dailyMicroUsd: 500000,
+const base = { enabled: true, freeAiConfirmed: true, dailyCalls: 100, dailyMicroUsd: 1000000,
  validationCalls: 20, validationMicroUsd: 200000, maxAiCallsPerRound: 20, discoveryMode: 'adaptive',
  vision: { enabled: true, dailyMicroCny: 500000, roundCalls: 3, validationCalls: 6, validationMicroCny: 200000 } };
 function raw(n, patch = {}) { return { id: id(n), user: { userid: id(100+n), nickname: '作者' }, type: 'video',
@@ -17,7 +17,7 @@ function setup({ items = [raw(1)], related = [], failContent = false, visionErro
   generate: async messages => { modelCalls++; const note = JSON.parse(messages[1].content);
    return JSON.stringify(note.desc ? {verdict:'cooking',evidence:'加水蒸十分钟'} : {verdict:'uncertain',evidence:''}); },
   review: async () => { visualCalls++; if (visionError) return {verdict:'error',reason:'VISION_HTTP_ERROR'};
-   return {verdict:'cooking',evidenceSource:'frames',evidence:[{frame:1,observation:'加水搅拌'},{frame:2,observation:'加热煮熟'}]}; },
+   return {verdict:'on_topic',evidenceSource:'frames',evidence:[{frame:1,observation:'加水搅拌'},{frame:2,observation:'加热煮熟'}]}; },
   makeProvider: options => new Provider({...options, fetcher: async (url) => {
    const kind = new URL(url).pathname.split('/').at(-1); calls.push(kind);
    if (kind === 'get_creator_hot_inspiration_feed') return response({items:[{title:'家常菜做法',hot_id:'1234567'}]});
@@ -84,7 +84,7 @@ test('a text model outage can still publish independently verified video results
  const snapshot=await x.store.get('dfp_snapshots',result.snapshotId);
  assert.equal(snapshot.boards.week,1);assert.ok(snapshot.coverage.gaps.includes('MODEL_UNAVAILABLE'));
  const row=await x.store.get('dfp_candidates',`20260912-0900_${id(1)}`);
- assert.equal(row.note.textJudgment.verdict,'error');assert.equal(row.note.judgment.verdict,'cooking');
+ assert.equal(row.note.textJudgment.verdict,'error');assert.equal(row.note.judgment.verdict,'on_topic');
  assert.equal(x.counts().visualCalls,1);
 });
 test('two consecutive text failures stop new text calls, while eligible videos still use bounded vision',async()=>{
@@ -143,7 +143,7 @@ test('invalid visual evidence retains the old snapshot and preserves safe attemp
 test('refill inspects new cooking content after rejecting the first batch without resetting spent calls',async()=>{
  const store=new MemoryStore(),first=Array.from({length:12},(_,i)=>raw(i+1,{title:'餐厅探店'+(i+1),desc:'我在探店吃饭，没做菜。'}));
  const good=raw(30,{title:'蒸蛋做法',desc:'鸡蛋2个，加水搅匀，蒸十分钟。'});let modelCalls=0,searches=0;
- const deps={store,config:{...base,budgetTier:'expanded250',dailyCalls:250,dailyMicroUsd:2500000,sweepCalls:100,vision:{...base.vision,enabled:false}},key:'fixture-key',clock:()=>NOW,verify:async()=>PRICE,
+ const deps={store,config:{...base,budgetTier:'expanded250',dailyCalls:500,dailyMicroUsd:5000000,sweepCalls:200,vision:{...base.vision,enabled:false}},key:'fixture-key',clock:()=>NOW,verify:async()=>PRICE,
   generate:async messages=>{modelCalls++;const n=JSON.parse(messages[1].content);return JSON.stringify(n.title.startsWith('餐厅探店')?{verdict:'not_cooking',evidence:'我在探店吃饭'}:{verdict:'cooking',evidence:'加水搅匀'});},
   makeProvider:options=>new Provider({...options,fetcher:async url=>{const u=new URL(url),kind=u.pathname.split('/').at(-1);
    if(kind==='search_notes'){searches++;return response({items:(modelCalls>=12?[good]:first).map(note=>({note}))});}
@@ -157,7 +157,7 @@ test('refill inspects new cooking content after rejecting the first batch withou
  const round=await store.get('dfp_rounds','20260912-0900');assert.ok(round.progress.discovery.refillPasses>=1);assert.ok(round.calls>12);assert.ok(round.calls<=50);assert.equal(round.progress.discovery.pendingCandidateCount,0);assert.equal(round.progress.candidateIds.length,13);assert.equal(new Set(round.progress.candidateIds).size,13);assert.ok(searches>1);assert.equal(modelCalls,13);
 });
 test('refill ordering preserves a missing queued ID instead of silently deleting it',async()=>{
- const x=setup();x.deps.config={...base,budgetTier:'expanded250',dailyCalls:250,dailyMicroUsd:2500000,sweepCalls:100,vision:{...base.vision,enabled:false}};
+ const x=setup();x.deps.config={...base,budgetTier:'expanded250',dailyCalls:500,dailyMicroUsd:5000000,sweepCalls:200,vision:{...base.vision,enabled:false}};
  const {scheduledRound}=require('../cloudfunctions/collectTick/lib/config'),round=scheduledRound(NOW,x.deps.config);
  const progress={candidateIds:[id(1),id(2)],candidateIndex:1,aiCalls:0,gaps:[],successfulSearches:0,discovery:{jobs:[],index:0,done:true,refillNeedsOrdering:true,candidateCount:2,pendingCandidateCount:1,freshContent:0,successfulContent:0,successfulMetadata:0}};
  await x.store.put('dfp_rounds',round.id,{status:'running',definition:round,progress,calls:0,microUsd:0});await x.store.put('dfp_candidates',round.id+'_'+id(1),{roundId:round.id,stage:'skipped',outcome:'rejected_content',note:{noteId:id(1),authorId:id(101)}});await x.store.put('dfp_state','latest',{snapshotId:'old'});

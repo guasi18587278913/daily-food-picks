@@ -18,14 +18,14 @@ test('unchanged visual content reuses the decision without downloading or paying
  const store=new MemoryStore(),lease=await claimLease(store,{owner:'test',now:NOW});let downloads=0,paid=0;
  const args={store,lease,round:{id:'20260912-0900',visionEnabled:true},note,settings:{enabled:true},clock:()=>NOW,
   verify:async()=>price,extract:async()=>{downloads++;return{samples:[{sha256:'one'},{sha256:'two'}]}},
-  classify:async()=>{paid++;return{verdict:'cooking',evidenceSource:'frames'}}};
- assert.equal((await reviewVideo(args)).verdict,'cooking');assert.equal((await reviewVideo(args)).cached,true);
+  classify:async()=>{paid++;return{verdict:'on_topic',evidenceSource:'frames'}}};
+ assert.equal((await reviewVideo(args)).verdict,'on_topic');assert.equal((await reviewVideo(args)).cached,true);
  assert.equal(downloads,1);assert.equal(paid,1);
 });
 test('identical frames are insufficient and never sent to a paid model',async()=>{
  const store=new MemoryStore(),lease=await claimLease(store,{owner:'test',now:NOW});let paid=0;
  const result=await reviewVideo({store,lease,round:{visionEnabled:true},note,settings:{enabled:true},clock:()=>NOW,verify:async()=>price,
-  extract:async()=>({samples:Array.from({length:6},()=>({sha256:'same'}))}),classify:async()=>{paid++;return{verdict:'cooking'}}});
+  extract:async()=>({samples:Array.from({length:6},()=>({sha256:'same'}))}),classify:async()=>{paid++;return{verdict:'on_topic'}}});
  assert.equal(result.verdict,'uncertain');assert.equal(result.reason,'identical_frames');assert.equal(paid,0);
 });
 test('offline repeat-cost comparison keeps board outputs while removing redundant checks',async()=>{
@@ -35,6 +35,6 @@ test('visual cache write failure keeps the successful model decision instead of 
  const store=new MemoryStore(),lease=await claimLease(store,{owner:'test',now:NOW});
  const transact=store.transaction.bind(store);store.transaction=fn=>transact(async tx=>{const put=tx.put.bind(tx);tx.put=async(c,id,v)=>{if(id.startsWith('judgment_'))throw Error('CACHE_WRITE_TEST');return put(c,id,v)};return fn(tx)});
  const result=await reviewVideo({store,lease,round:{visionEnabled:true},note,settings:{enabled:true},clock:()=>NOW,verify:async()=>price,
- extract:async()=>({samples:[{sha256:'one'},{sha256:'two'}]}),classify:async()=>({verdict:'cooking',evidenceSource:'frames'})});
- assert.equal(result.verdict,'cooking');assert.equal(result.cacheWarning,'CACHE_UNAVAILABLE');
+ extract:async()=>({samples:[{sha256:'one'},{sha256:'two'}]}),classify:async()=>({verdict:'on_topic',evidenceSource:'frames'})});
+ assert.equal(result.verdict,'on_topic');assert.equal(result.cacheWarning,'CACHE_UNAVAILABLE');
 });

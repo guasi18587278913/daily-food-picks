@@ -6,11 +6,12 @@ const { previouslyPublished } = require('./publisher');
 const { assertLease } = require('./budget');
 const { recordFansObservation } = require('./authors');
 const POLICY = require('../config/discovery.json');
-const KEYWORDS = require('../config/keywords.json');
+const { track, DEFAULT_TRACK } = require('./tracks');
+const { ON_TOPIC } = require('./judge');
 // Content jobs return posts for the candidate pool; the rest return leads (signals) or an author profile.
 const yieldsNotes = kind => endpoint(kind)?.yields === 'notes';
 const sourceKey = (kind, params) => `source_${digest([kind, Object.fromEntries(Object.entries(params).sort())]).slice(0, 48)}`;
-const foodHint = text => POLICY.foodHints.some(h => String(text || '').toLowerCase().includes(h.toLowerCase()));
+const hintMatch = (text, hints) => hints.some(h => String(text || '').toLowerCase().includes(h.toLowerCase()));
 // Search variants a keyword is tried with. In the audited 2026-09-14/15 rounds image notes never reached the 24-hour
 // today threshold (0 of 80 results), so the 06:00 sweep searches videos only. Regular rounds add a collect-sorted
 // video variant: saved-to-liked ratio separated cooking videos (median 0.84) from the rest (about 0.25).
@@ -19,10 +20,13 @@ const REGULAR_VARIANTS = Object.freeze([{ note_type: '视频笔记' }, { note_ty
   { note_type: '视频笔记', sort_type: 'collect_descending' }]);
 const searchVariants = round => round.kind === 'sweep' ? SWEEP_VARIANTS : REGULAR_VARIANTS;
 // Keywords that produced today picks in audited sweeps come first; the rest of the list keeps rotating daily.
-function sweepKeywords() {
-  const priority = KEYWORDS.dailySweep.priorityKeywords || [];
-  return [...new Set([...priority, ...KEYWORDS.dailySweep.keywords])];
+function sweepKeywords(keywords) {
+  const priority = keywords.dailySweep.priorityKeywords || [];
+  return [...new Set([...priority, ...keywords.dailySweep.keywords])];
 }
+// A round always names its track; a round stored before tracks existed is a food round.
+const keywordsOf = round => track(round?.track || DEFAULT_TRACK).keywords;
+const hintsOf = round => track(round?.track || DEFAULT_TRACK).topicHints;
 // The sweep only publishes today picks; author collections and image-note searches have not produced any.
 function admitsSource(round, seed) {
   if (round.kind !== 'sweep') return true;
@@ -107,8 +111,9 @@ class Discovery {
   }
   fixedSearchSeeds(day, slot) {
     const sweep = this.round.kind === 'sweep';
-    const words = sweep ? sweepKeywords() : KEYWORDS.groups[(day * 3 + Math.max(0, slot - 1)) % KEYWORDS.groups.length];
-    const priority = sweep ? (KEYWORDS.dailySweep.priorityKeywords || []).slice(0, 12) : [];
+    const keywords = keywordsOf(this.round);
+    const words = sweep ? sweepKeywords(keywords) : keywords.groups[(day * 3 + Math.max(0, slot - 1)) % keywords.groups.length];
+    const priority = sweep ? (keywords.dailySweep.priorityKeywords || []).slice(0, 12) : [];
     const rotating = words.filter(w => !priority.includes(w));
     // The daily step of seven is coprime with both list sizes, so every rotating word gets its turn.
     const rotation = rotating.length ? (day * 7 + Math.max(0, slot) * 3) % rotating.length : 0;
@@ -154,7 +159,7 @@ class Discovery {
   }
   async signals(result, job) {
     for (const signal of (result.signals || []).slice().reverse()) {
-      if (!foodHint(signal.label)) continue;
+      if (!hintMatch(signal.label, hintsOf(this.round))) continue;
       let seed;
       if (signal.pageId) seed = source('topic', { page_id: signal.pageId, sort: this.round.kind === 'sweep' ? 'time' : 'trend' }, signal.label, job.origin, this.clock());
       else if (signal.label.length <= 60) seed = source('search', { keyword: signal.label, note_type: '不限' }, signal.label, job.origin, this.clock());
@@ -209,11 +214,11 @@ class Discovery {
     state.done = false; state.stopReason = null;
     return true;
   }
-  async rememberCooking(note, origin = 'author') {
-    if (note.judgment?.verdict !== 'cooking') return;
+  async rememberOnTopic(note, origin = 'author') {
+    if (note.judgment?.verdict !== ON_TOPIC) return;
     await this.remember(source('author', { user_id: note.authorId }, note.author, 'author', this.clock()));
     await this.remember(source('user', { user_id: note.authorId }, `${note.author}的公开收藏`, 'faved', this.clock()));
-    for (const topic of (note.topics || []).filter(x => foodHint(x.label)).slice(0, 2))
+    for (const topic of (note.topics || []).filter(x => hintMatch(x.label, hintsOf(this.round))).slice(0, 2))
       await this.remember(source('topic', { page_id: topic.pageId, sort: 'trend' }, topic.label, origin, this.clock()));
   }
   async step(provider) {
@@ -230,7 +235,8 @@ class Discovery {
     }
     if (dynamic && state.index >= state.jobs.length && candidateCount < target) {
       // Continue unused, type-specific searches only when the first source batch was too sparse.
-      const words = this.round.kind === 'sweep' ? sweepKeywords() : [...new Set(KEYWORDS.groups.flat())];
+      const words = this.round.kind === 'sweep' ? sweepKeywords(keywordsOf(this.round))
+        : [...new Set(keywordsOf(this.round).groups.flat())];
       for (const word of words) for (const variant of searchVariants(this.round)) {
         if (state.jobs.length >= POLICY.maxTasks) break;
         const seed = source('search', { keyword: word, ...variant }, word, 'keyword', this.clock());
@@ -262,7 +268,7 @@ class Discovery {
         const notes = await provider.notes(result);
         await this.addNotes(notes, { key: job.sourceKey, type: job.origin, label: job.label });
         state.successfulContent++; if (!result.cached) state.freshContent++;
-        if (job.kind === 'faved') for (const note of notes.filter(n => foodHint(n.title + n.desc)).slice(0, 2)) {
+        if (job.kind === 'faved') for (const note of notes.filter(n => hintMatch(n.title + n.desc, hintsOf(this.round))).slice(0, 2)) {
           const seed = source('author', { user_id: note.authorId }, note.author, 'faved', this.clock());
           if (await this.remember(seed)) this.enqueue(seed, true);
         }
@@ -321,4 +327,4 @@ async function finalizeStatistics({ store, lease, round, progress, rows, now }) 
     await tx.put('dfp_rounds', round.id, { ...current, discoveryStatsApplied: true });
   });
 }
-module.exports = { Discovery, admitsCandidate, admitsSource, foodHint, source, sourceKey, jobFor, rankSources, searchVariants, sweepKeywords, finalizeStatistics, POLICY };
+module.exports = { Discovery, admitsCandidate, admitsSource, hintMatch, source, sourceKey, jobFor, rankSources, searchVariants, sweepKeywords, finalizeStatistics, POLICY };

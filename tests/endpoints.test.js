@@ -40,7 +40,7 @@ test('budget reads the discovery-only flag from the same table', async () => {
   const lease = await claimLease(store, { owner: 'worker', now: NOW });
   await store.put('dfp_rounds', '20260915-0900', { status: 'running', calls: 0, microUsd: 0, definition: { kind: 'regular' } });
   const price = { source: PRICE_URL, microUsd: PRICE_MICRO_USD, verifiedAt: NOW - 1000, expiresAt: NOW + 3600000 };
-  const limits = { dailyCalls: 50, dailyMicroUsd: 500000, roundCalls: 17, validationCalls: 20, validationMicroUsd: 200000 };
+  const limits = { dailyCalls: 100, dailyMicroUsd: 1000000, roundCalls: 17, validationCalls: 20, validationMicroUsd: 200000 };
   const base = { roundId: '20260915-0900', attempt: 1, now: NOW, lease, limits, price };
   await assert.rejects(reserveAttempt(store, { ...base, requestKey: 'bogus:1', kind: 'constructor' }), /INVALID_REQUEST/);
   for (const [kind, spec] of Object.entries(ENDPOINTS)) {

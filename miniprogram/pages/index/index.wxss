@@ -108,3 +108,10 @@
 .code-form .primary-button{justify-content:center;margin-top:24rpx}
 .code-hint{margin-top:24rpx;font-size:26rpx;line-height:1.6;color:var(--accent-ink)}
 .manage-button{display:flex;align-items:center;justify-content:flex-end;gap:12rpx;height:88rpx;margin-left:auto;font-size:26rpx;color:var(--accent-ink)}
+
+/* The two niches are peers, so the tabs read as one control rather than a primary and a secondary action. */
+.track-tabs { display: flex; gap: 8rpx; padding: 16rpx 0 0; }
+.track-tab { flex: 1; margin: 0; padding: 16rpx 8rpx; border: none; border-radius: 12rpx; background: rgba(0, 0, 0, 0.04);
+  color: #6b6560; font-size: 28rpx; line-height: 1.4; font-weight: 500; }
+.track-tab::after { border: none; }
+.track-tab.selected { background: #2f2a26; color: #fdfbf7; }

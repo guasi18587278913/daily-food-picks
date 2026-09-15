@@ -4,7 +4,7 @@ const { MemoryStore, NOW, PRICE } = require('./helpers');
 const { runTick } = require('../cloudfunctions/collectTick/lib/runner');
 const { Provider } = require('../cloudfunctions/collectTick/lib/provider');
 const id = n => n.toString(16).padStart(24, '0');
-const base = { enabled: true, freeAiConfirmed: true, dailyCalls: 50, dailyMicroUsd: 500000,
+const base = { enabled: true, freeAiConfirmed: true, dailyCalls: 100, dailyMicroUsd: 1000000,
   validationCalls: 20, validationMicroUsd: 200000, maxAiCallsPerRound: 20, discoveryMode: 'adaptive',
   vision: { enabled: true, dailyMicroCny: 500000, roundCalls: 3, validationCalls: 6, validationMicroCny: 200000 } };
 const stream = { media: { video: { duration: 30 }, stream: { h264: [{ master_url: 'http://sns-video-v28.xhscdn.com/stream/1/a', size: 1000 }] } } };
@@ -16,7 +16,7 @@ function setup({ detailHasStream }) {
   const target = raw(1, { video_info_v2: stream }), related = raw(2);
   const deps = { store, config: base, key: 'fixture-key', clock: () => NOW, verify: async () => PRICE,
     generate: async () => JSON.stringify({ verdict: 'uncertain', evidence: '' }),
-    review: async ({ note }) => { reviewed.push(note.noteId); return { verdict: 'cooking', evidenceSource: 'frames', evidence: [{ frame: 1, observation: '加水搅拌' }, { frame: 2, observation: '加热煮熟' }] }; },
+    review: async ({ note }) => { reviewed.push(note.noteId); return { verdict: 'on_topic', evidenceSource: 'frames', evidence: [{ frame: 1, observation: '加水搅拌' }, { frame: 2, observation: '加热煮熟' }] }; },
     makeProvider: options => new Provider({ ...options, fetcher: async url => {
       const u = new URL(url); const kind = u.pathname.split('/').at(-1); calls.push(`${kind}:${u.searchParams.get('note_id') || ''}`);
       if (kind === 'get_creator_hot_inspiration_feed') return response({ items: [] });

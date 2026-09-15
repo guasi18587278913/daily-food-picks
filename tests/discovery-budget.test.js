@@ -48,7 +48,7 @@ async function dynamicSetup({calls=18,candidates=5,dailyCalls=calls,research=0,r
  const definition={kind:'sweep',budgetTier:'expanded250',discoveryMode:'adaptive',discoveryAllocation:'candidate-reserve-v1',roundCalls,...(supplementReserve?{supplement:true,reservedRegularCalls:supplementReserve}:{})};
  await store.put('dfp_rounds','20260912-0900',{status:'running',definition,calls,discoveryCalls:calls,progress:{discovery:{candidateCount:candidates}}});
  await store.put('dfp_budgets','2026-09-12',{calls:dailyCalls,microUsd:dailyCalls*10000,additionalResearchCalls:research,additionalResearchMicroUsd:research*10000});
- return{store,lease,request:req(lease,'next','search',{limits:{...LIMITS,budgetTier:'expanded250',dailyCalls:250,dailyMicroUsd:2500000,roundCalls}})};
+ return{store,lease,request:req(lease,'next','search',{limits:{...LIMITS,budgetTier:'expanded250',dailyCalls:500,dailyMicroUsd:5000000,roundCalls}})};
 }
 test('a sparse new sweep continues past eighteen discovery calls while preserving inspection funds',async()=>{
  const x=await dynamicSetup();await reserveAttempt(x.store,x.request);assert.equal((await x.store.get('dfp_rounds','20260912-0900')).calls,19);
@@ -59,7 +59,7 @@ test('the exact discovery plus inspection boundary allows one reservation and re
  await assert.rejects(reserveAttempt(x.store,{...x.request,requestKey:'overflow'}),/DISCOVERY_INSPECTION_RESERVE/);assert.deepEqual(x.store.docs,before);
 });
 test('daily research money and later supplement rounds reduce discovery space before inspection does',async()=>{
- for(const settings of [{dailyCalls:220,research:10},{dailyCalls:160,research:20,supplementReserve:50}]){
+ for(const settings of [{dailyCalls:470,research:10},{dailyCalls:410,research:20,supplementReserve:50}]){
   const x=await dynamicSetup(settings),before=structuredClone(x.store.docs);await assert.rejects(reserveAttempt(x.store,x.request),/DISCOVERY_INSPECTION_RESERVE/);assert.deepEqual(x.store.docs,before);
   await reserveAttempt(x.store,{...x.request,kind:'note_video',purpose:'inspection'});
  }

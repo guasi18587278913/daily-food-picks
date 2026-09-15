@@ -11,10 +11,10 @@ const { publish, readSnapshot } = require('../cloudfunctions/collectTick/lib/pub
 const at = text => Date.parse(text);
 const iso = text => new Date(at(text)).toISOString();
 const ID = n => n.toString(16).padStart(24, '0');
-const SWEEP = { dailyCalls: 150, dailyMicroUsd: 1500000, sweepCalls: 100, validationCalls: 20, validationMicroUsd: 200000 };
+const SWEEP = { dailyCalls: 300, dailyMicroUsd: 3000000, sweepCalls: 200, validationCalls: 20, validationMicroUsd: 200000 };
 const RUN = { ...SWEEP, enabled: true, freeAiConfirmed: true, maxAiCallsPerRound: 20 };
-const ENV = { DFP_ENABLED: 'true', DFP_FREE_AI_CONFIRMED: 'true', DFP_TIMER_SECRET: 'a'.repeat(64), DFP_DAILY_CALLS: '150',
-  DFP_DAILY_MICRO_USD: '1500000', DFP_VALIDATION_CALLS: '20', DFP_VALIDATION_MICRO_USD: '200000', DFP_SWEEP_CALLS: '100' };
+const ENV = { DFP_ENABLED: 'true', DFP_FREE_AI_CONFIRMED: 'true', DFP_TIMER_SECRET: 'a'.repeat(64), DFP_DAILY_CALLS: '300',
+  DFP_DAILY_MICRO_USD: '3000000', DFP_VALIDATION_CALLS: '20', DFP_VALIDATION_MICRO_USD: '200000', DFP_SWEEP_CALLS: '200' };
 const priceAt = now => ({ ...PRICE, verifiedAt: now - 1000, expiresAt: now + 3600000 });
 
 const TODAY = { noteId: ID(1), authorId: ID(9), title: '炒酸奶', desc: '酸奶加芒果冷冻二十分钟', author: '作者', type: 'video',
@@ -62,10 +62,10 @@ test('without an approved sweep budget 06:00 opens no paid round', () => {
 
 test('configuration refuses call or money caps that would silently reshape the day', () => {
   const config = loadConfig(ENV);
-  assert.deepEqual([config.dailyCalls, config.dailyMicroUsd, config.sweepCalls], [150, 1500000, 100]);
-  assert.equal(loadConfig({ ...ENV, DFP_DAILY_CALLS: '50', DFP_DAILY_MICRO_USD: '500000', DFP_SWEEP_CALLS: '' }).sweepCalls, null);
-  for (const patch of [{ DFP_SWEEP_CALLS: '' }, { DFP_SWEEP_CALLS: '101' }, { DFP_SWEEP_CALLS: 'many' }, { DFP_DAILY_CALLS: '151' },
-    { DFP_DAILY_MICRO_USD: '1500001' }, { DFP_DAILY_CALLS: '101' }, { DFP_DAILY_MICRO_USD: '500000' }]) {
+  assert.deepEqual([config.dailyCalls, config.dailyMicroUsd, config.sweepCalls], [300, 3000000, 200]);
+  assert.equal(loadConfig({ ...ENV, DFP_DAILY_CALLS: '100', DFP_DAILY_MICRO_USD: '1000000', DFP_SWEEP_CALLS: '' }).sweepCalls, null);
+  for (const patch of [{ DFP_SWEEP_CALLS: '' }, { DFP_SWEEP_CALLS: '201' }, { DFP_SWEEP_CALLS: 'many' }, { DFP_DAILY_CALLS: '301' },
+    { DFP_DAILY_MICRO_USD: '3000001' }, { DFP_DAILY_CALLS: '201' }, { DFP_DAILY_MICRO_USD: '1000000' }]) {
     assert.throws(() => loadConfig({ ...ENV, ...patch }), /CONFIGURATION_INCOMPLETE/, JSON.stringify(patch));
   }
 });
@@ -277,7 +277,7 @@ test('an unpublished 06:00 sweep is reported by later rounds, while a day withou
   assert.match(reported.partialReason, /06:00/);
   assert.deepEqual(reported.coverage.carriedToday, { snapshotId: null, count: 0, errorCode: 'SWEEP_NOT_PUBLISHED' });
   const plain = new MemoryStore();
-  const disabled = await runTick(deps(plain, at('2026-09-13T12:02:00+08:00'), log, { config: { ...RUN, dailyCalls: 50, dailyMicroUsd: 500000, sweepCalls: null } }));
+  const disabled = await runTick(deps(plain, at('2026-09-13T12:02:00+08:00'), log, { config: { ...RUN, dailyCalls: 100, dailyMicroUsd: 1000000, sweepCalls: null } }));
   assert.equal(disabled.status, 'complete');
   assert.equal((await readSnapshot(plain, disabled.snapshotId)).coverage.carriedToday, null);
 });
@@ -334,7 +334,7 @@ test('a failed read is not retried when the round ends for another reason or wit
     const sweep = await runTick(deps(store, at('2026-09-13T06:02:00+08:00'), []));
     failSnapshotReads(store, sweep.snapshotId);
     const round = scheduledRound(at('2026-09-13T09:02:00+08:00'), SWEEP);
-    const note = { ...WEEK_ONLY, noteId: ID(7), boards: ['week'], judgment: { verdict: 'cooking', evidence: '酸奶加芒果冷冻二十分钟' } };
+    const note = { ...WEEK_ONLY, noteId: ID(7), boards: ['week'], judgment: { verdict: 'on_topic', evidence: '酸奶加芒果冷冻二十分钟' } };
     await store.put('dfp_rounds', round.id, { status: 'running', definition: round, closesAt: round.closesAt, calls: 0, microUsd: 0, day: round.day });
     await store.put('dfp_candidates', `${round.id}_${note.noteId}`, { roundId: round.id, stage: 'done', note });
     const lease = await claimLease(store, { owner: 'worker', now });
@@ -361,7 +361,7 @@ test('reaching the per-round judgment cap is reported as its own reason, not as 
 test('carried notes are shown once without new search rows or recommendation references', async () => {
   const store = new MemoryStore(); const now = at('2026-09-13T09:02:00+08:00');
   const lease = await claimLease(store, { owner: 'worker', now });
-  const note = { ...TODAY, boards: ['today'], judgment: { verdict: 'cooking', evidence: '酸奶加芒果冷冻二十分钟' } };
+  const note = { ...TODAY, boards: ['today'], judgment: { verdict: 'on_topic', evidence: '酸奶加芒果冷冻二十分钟' } };
   const sweepRound = { id: '20260913-0600', scheduledAt: at('2026-09-13T06:00:00+08:00') };
   await store.put('dfp_rounds', sweepRound.id, { status: 'running' });
   const first = await publish({ store, lease, round: sweepRound, notes: [note], status: 'complete', coverage: {}, successfulSearches: 1, now });

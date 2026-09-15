@@ -1,4 +1,5 @@
 'use strict';
+const { ON_TOPIC, OFF_TOPIC, UNCERTAIN } = require('./judge');
 const { judgmentKey, readCache, writeCache } = require('./reuse');
 const { extractFrames, SAMPLER_VERSION } = require('./video');
 const { classifyFrames, verifyVisionPrice, VERSION } = require('./vision');
@@ -13,11 +14,11 @@ async function cachedJudgment(store, note, mode, now, warn = () => {}) {
   const { key, version } = identity(note, mode);
   try {
     const cached = await readCache(store, key, { now, maxAgeMs: 7 * DAY, version });
-    return cached && ['cooking', 'not_cooking', 'uncertain'].includes(cached.value.verdict) ? cached.value : null;
+    return cached && [ON_TOPIC, OFF_TOPIC, UNCERTAIN].includes(cached.value.verdict) ? cached.value : null;
   } catch (e) { if (e.code === 'LEASE_EXPIRED') throw e; warn('CACHE_UNAVAILABLE'); return null; }
 }
 async function cacheJudgment(store, lease, note, mode, value, now) {
-  if (!['cooking', 'not_cooking', 'uncertain'].includes(value?.verdict)) return;
+  if (![ON_TOPIC, OFF_TOPIC, UNCERTAIN].includes(value?.verdict)) return;
   const { key, version } = identity(note, mode); if (!key) return;
   try { await writeCache(store, lease, key, { capturedAt: now, ttlMs: value.verdict === 'uncertain' ? DAY : 7 * DAY, version, value }, now); }
   catch (e) { if (e.code === 'LEASE_EXPIRED') throw e; return 'CACHE_UNAVAILABLE'; }

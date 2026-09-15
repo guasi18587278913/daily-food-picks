@@ -13,7 +13,7 @@ test('a video can cite an explicit preparation title without written recipe step
     input = JSON.parse(messages[1].content);
     return answer('cooking', note.title, 'title');
   });
-  assert.equal(result.verdict, 'cooking');
+  assert.equal(result.verdict, 'on_topic');
   assert.equal(result.evidence, note.title);
   assert.equal(result.evidenceSource, 'title');
   assert.equal(input.type, 'video', 'the classifier must know which evidence rule applies');
@@ -22,7 +22,7 @@ test('a video can cite an explicit preparation title without written recipe step
 test('a video may cite preparation intent in its description instead of its title', () => {
   const note = video({ title: '红豆冰', desc: '复刻港式红豆冰，今天在家动手做。' });
   const result = parseJudgment(answer('cooking', note.desc), note);
-  assert.equal(result.verdict, 'cooking');
+  assert.equal(result.verdict, 'on_topic');
   assert.equal(result.evidenceSource, 'desc');
 });
 
@@ -46,7 +46,7 @@ test('a tutorial hashtag alone is not a preparation claim', () => {
 
 test('explicit making and actual procedure titles are both valid video evidence', () => {
   for (const title of ['沉浸式做蛋糕', '牛肉切片后腌制20分钟', '电饭锅一锅出，三菜一汤一主食']) {
-    assert.equal(parseJudgment(answer('cooking', title, 'title'), video({ title, desc: '' })).verdict, 'cooking');
+    assert.equal(parseJudgment(answer('cooking', title, 'title'), video({ title, desc: '' })).verdict, 'on_topic');
   }
 });
 
@@ -64,9 +64,9 @@ test('a dish name is not exclusion evidence even when paired with a vague descri
 
 test('an explicit eating caption can still be excluded and a written procedure can still be accepted', () => {
   const eating = video({ title: '沉浸式吃播', desc: '沉浸式吃播' });
-  assert.equal(parseJudgment(answer('not_cooking', eating.desc), eating).verdict, 'not_cooking');
+  assert.equal(parseJudgment(answer('not_cooking', eating.desc), eating).verdict, 'off_topic');
   const cooking = video({ title: '牛肉切片后腌制20分钟', desc: '牛肉切片后腌制20分钟' });
-  assert.equal(parseJudgment(answer('cooking', cooking.desc), cooking).verdict, 'cooking');
+  assert.equal(parseJudgment(answer('cooking', cooking.desc), cooking).verdict, 'on_topic');
 });
 
 test('titles are not recipe evidence for image notes and vague video titles are not preparation evidence', () => {
@@ -88,7 +88,7 @@ test('all definite verdicts require evidence from the declared source and reject
 test('legacy full-body evidence remains valid and is explicitly recorded as description evidence', () => {
   const note = { title: '蒸蛋', desc: '鸡蛋加水蒸十分钟。', type: 'normal', bodyComplete: true };
   const result = parseJudgment(JSON.stringify({ verdict: 'cooking', evidence: '鸡蛋加水蒸十分钟。' }), note);
-  assert.equal(result.verdict, 'cooking');
+  assert.equal(result.verdict, 'on_topic');
   assert.equal(result.evidenceSource, 'desc');
 });
 
@@ -101,7 +101,7 @@ test('an explicitly empty detail description is complete and allows a video titl
   let calls = 0;
   const result = await judgeNote(note, async () => { calls++; return answer('cooking', note.title, 'title'); });
   assert.equal(calls, 1);
-  assert.equal(result.verdict, 'cooking');
+  assert.equal(result.verdict, 'on_topic');
 });
 
 test('missing, truncated or overlong detail text does not enter the model through the title exception', async () => {

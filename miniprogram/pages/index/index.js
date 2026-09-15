@@ -9,6 +9,8 @@ Page({
   data: {
     // access: checking | ready | needsCode | suspended | blocked — decided by the server, never guessed here.
     access: 'checking', role: '', codeInput: '', redeeming: false,
+    // Two niches monitored by the same rules; the tab only decides which one's rounds are being read.
+    track: 'food', tracks: [{ key: 'food', label: '深夜食堂' }, { key: 'fde', label: 'AI 工程' }],
     mode: 'round', query: '', loading: true, loadingMore: false, message: '',
     statusLabel: '正在查看更新', statusTone: '', roundLabel: '每天更新，给创作找点新意', updatedLabel: '',
     partialReason: '', coverageNotice: '基于当轮关键词发现选题，未覆盖小红书全部内容。',
@@ -170,10 +172,24 @@ Page({
       favoriteCards: this.data.mode === 'favorites' ? this._notes.map(note => card(note, note.boards?.[0] || 'week', 'likes', has(note.noteId))) : [],
       favoriteCount: this._favorites?.ids().length || 0 });
   },
+  /** Switching niche starts a fresh read: the other track's rounds, cursors and cached notes must not survive it.
+   * @param {{ currentTarget?: { dataset?: { track?: string } } }} event */
+  async switchTrack(event) {
+    const track = String(event?.currentTarget?.dataset?.track || '');
+    if (!this.data.tracks.some(x => x.key === track) || track === this.data.track) return;
+    this._requestId++; this._statusRequestId++;
+    this._notes = []; this._accounts = [];
+    this._currentRoundId = null; this._latestId = null; this._newestId = null; this._roundCursor = null;
+    this.setData({ track, mode: 'round', query: '', loading: true, loadingMore: false, message: '', newAvailable: false,
+      total: 0, entries: 0, nextCursor: null, rounds: [], roundIndex: 0, olderRounds: false,
+      partialReason: '', statusLabel: '正在查看更新', statusTone: '', updatedLabel: '',
+      boardViews: boards([], this.data.sorts, () => false, []) });
+    await this.checkUpdates();
+  },
   async checkUpdates() {
     const statusRequest = ++this._statusRequestId;
     try {
-      const status = await this._api('status');
+      const status = await this._api('status', { track: this.data.track });
       if (statusRequest !== this._statusRequestId) return;
       const labels = /** @type {Record<string,string>} */ ({ pending: '等待首次更新', running: '新选题整理中', complete: '已更新', partial: '本轮部分更新', failed: '本轮更新未完成', budget_exhausted: '本轮已到调用上限' });
       const tones = /** @type {Record<string,string>} */ ({ complete: 'ok', partial: 'warn', budget_exhausted: 'warn', failed: 'error' });
@@ -213,7 +229,7 @@ Page({
   /** @param {boolean} [append] */
   async loadRounds(append = false) {
     try {
-      const result = await this._api('listRounds', { limit: 20, cursor: append ? this._roundCursor : null });
+      const result = await this._api('listRounds', { track: this.data.track, limit: 20, cursor: append ? this._roundCursor : null });
       const incoming = /** @type {RoundItem[]} */ (result.rounds);
       const all = append ? [...this.data.rounds, ...incoming] : incoming;
       const unique = [...new Map(all.map(x => [x.snapshotId, x])).values()].map(x => ({ ...x, label: `${formatTime(x.scheduledAt, true)} · ${x.count} 篇` }));

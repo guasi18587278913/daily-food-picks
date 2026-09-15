@@ -52,7 +52,11 @@
     <button class="primary-button" bindtap="checkAccess">重新查看</button>
   </view>
   <block wx:else>
-    <view class="status-line"><view class="status-dot {{statusTone}}"></view><text>{{statusLabel}}</text><text class="status-schedule">每日 06 / 09 / 12 / 20 点更新</text></view>
+    <view class="track-tabs">
+      <button wx:for="{{tracks}}" wx:key="key" class="track-tab {{track === item.key ? 'selected' : ''}}"
+        data-track="{{item.key}}" bindtap="switchTrack" aria-label="切换到{{item.label}}">{{item.label}}</button>
+    </view>
+    <view class="status-line"><view class="status-dot {{statusTone}}"></view><text>{{statusLabel}}</text><text class="status-schedule">{{track === 'fde' ? '每日 07 / 10 / 13 / 21 点更新' : '每日 06 / 09 / 12 / 20 点更新'}}</text></view>
     <view class="view-bar">
       <view class="segment">
         <button class="segment-item {{mode !== 'favorites' ? 'selected' : ''}}" bindtap="onLatest"><text class="segment-label">选题台</text></button>

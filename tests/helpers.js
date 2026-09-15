@@ -37,7 +37,7 @@ class MemoryStore {
 }
 
 const NOW = Date.parse('2026-09-12T09:02:00+08:00');
-const LIMITS = { dailyCalls: 50, dailyMicroUsd: 500000, roundCalls: 17, validationCalls: 20, validationMicroUsd: 200000 };
+const LIMITS = { dailyCalls: 100, dailyMicroUsd: 1000000, roundCalls: 17, validationCalls: 20, validationMicroUsd: 200000 };
 const PRICE = { microUsd: 10000, verifiedAt: NOW - 1000, expiresAt: NOW + 3600000, source: 'https://tikhub.io/xiaohongshu-api' };
 
 async function prepared() {

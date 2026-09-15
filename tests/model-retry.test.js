@@ -17,7 +17,7 @@ test('rate-limited calls are retried with bounded pauses and then succeed withou
   let calls = 0; const pauses = [];
   const generate = async () => { calls++; if (calls < 3) throw rateLimited(); return good; };
   const result = await judgeNote(note, generate, { sleep: async ms => { pauses.push(ms); } });
-  assert.equal(result.verdict, 'cooking'); assert.equal(calls, 3); assert.equal(result.attempts, 3);
+  assert.equal(result.verdict, 'on_topic'); assert.equal(calls, 3); assert.equal(result.attempts, 3);
   assert.deepEqual(pauses, [...RATE_LIMIT_RETRY_DELAYS_MS]);
 });
 

@@ -1,4 +1,5 @@
 'use strict';
+const { TRACK_KEYS } = require('./tracks');
 
 const { createHash } = require('node:crypto');
 const { endpoint } = require('./endpoints');
@@ -13,11 +14,13 @@ function shanghaiDay(now) {
   return new Date(now + 8 * 3600000).toISOString().slice(0, 10);
 }
 function integer(value, min, max) { return Number.isSafeInteger(value) && value >= min && value <= max; }
-// Expansion requires an explicit server tier; old configurations retain their original ceilings.
+// Expansion requires an explicit server tier; old configurations retain their original ceilings. The tier names the
+// ceiling for one track, and the day's ledger counts every track, so the whole-day cap is that figure per track.
 function validateLimits(limits) {
   const expanded = limits?.budgetTier === 'expanded250';
+  const tracks = TRACK_KEYS.length;
   if (!limits || ![undefined, 'legacy150', 'expanded250'].includes(limits.budgetTier)
-    || !integer(limits.dailyCalls, 1, expanded ? 250 : 150) || !integer(limits.dailyMicroUsd, 1, expanded ? 2500000 : 1500000)
+    || !integer(limits.dailyCalls, 1, (expanded ? 250 : 150) * tracks) || !integer(limits.dailyMicroUsd, 1, (expanded ? 2500000 : 1500000) * tracks)
     || !integer(limits.roundCalls, 1, 100) || !integer(limits.validationCalls, 1, 20)
     || !integer(limits.validationMicroUsd, 1, 200000)) fail('INVALID_BUDGET');
 }

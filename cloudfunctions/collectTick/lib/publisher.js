@@ -1,4 +1,5 @@
 'use strict';
+const { DEFAULT_TRACK } = require('./tracks');
 
 const { digest, imageUrl } = require('./provider');
 const { assertLease } = require('./budget');
@@ -15,7 +16,8 @@ async function previouslyPublished(store, noteId) {
 // Works inspected before the three tiers existed carry only a verdict; a confirmed one still publishes.
 function contentTier(note) {
   if (['confirmed', 'unconfirmed'].includes(note.contentStatus)) return note.contentStatus;
-  return note.judgment?.verdict === 'cooking' ? 'confirmed' : null;
+  // 'cooking' is the verdict word used before the tracks shared one vocabulary; rows stored then still read correctly.
+  return ['on_topic', 'cooking'].includes(note.judgment?.verdict) ? 'confirmed' : null;
 }
 function publicNote(note) {
   const keys = ['noteId', 'title', 'author', 'authorId', 'type', 'publishedAt', 'likes', 'collected', 'comments',
@@ -112,16 +114,22 @@ async function publish({ store, lease, round, notes, carriedNotes = [], accounts
     await store.put('dfp_notes', indexId, { snapshotId: id, note: publicNote(note),
       searchText: [note.title, note.author, note.desc].map(x => typeof x === 'string' ? x : '').join('\n').toLocaleLowerCase() });
   }
+  const track = round.track || DEFAULT_TRACK;
   await store.transaction(async tx => {
     await assertLease(tx, lease, time());
     const current = await tx.get('dfp_rounds', round.id);
     if (current?.status !== 'running') throw error('ROUND_NOT_RUNNING');
     for (const note of unique) await tx.put('dfp_candidates', `published_${note.noteId}`, { snapshotId: id, indexId: `${id}_${note.noteId}` });
     for (const account of rising) await tx.put('dfp_results', `rising_published_${account.authorId}`, { recordType: 'rising_published', snapshotId: id, at: time() });
-    await tx.put('dfp_snapshots', id, { ...snapshot, published: true });
+    await tx.put('dfp_snapshots', id, { ...snapshot, track, published: true });
     await tx.put('dfp_rounds', round.id, { ...current, status, snapshotId: id, partialReason: partialReason || null, finishedAt: snapshot.finishedAt, coverage });
-    await tx.put('dfp_state', 'latest', { snapshotId: id, revision: id, scheduledAt: snapshot.scheduledAt, finishedAt: snapshot.finishedAt });
-    await tx.put('dfp_state', 'status', { roundId: round.id, status, partialReason: partialReason || null, scheduledAt: snapshot.scheduledAt, finishedAt: snapshot.finishedAt });
+    // Each track has its own newest snapshot, so one track's round never replaces what the other is showing.
+    // 'latest' stays the food pointer: a client from before the tracks existed keeps reading the board it knows.
+    const pointer = { snapshotId: id, revision: id, track, scheduledAt: snapshot.scheduledAt, finishedAt: snapshot.finishedAt };
+    await tx.put('dfp_state', `latest_${track}`, pointer);
+    if (track === DEFAULT_TRACK) await tx.put('dfp_state', 'latest', pointer);
+    await tx.put('dfp_state', `status_${track}`, { roundId: round.id, track, status, partialReason: partialReason || null, scheduledAt: snapshot.scheduledAt, finishedAt: snapshot.finishedAt });
+    if (track === DEFAULT_TRACK) await tx.put('dfp_state', 'status', { roundId: round.id, status, partialReason: partialReason || null, scheduledAt: snapshot.scheduledAt, finishedAt: snapshot.finishedAt });
   });
   return { ...snapshot, published: true };
 }

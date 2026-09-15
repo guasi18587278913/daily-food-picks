@@ -1,0 +1,24 @@
+{
+  "version": "2026-09-15-fde-from-probe",
+  "selection": "Regular rounds (10/13/21) rotate one two-keyword group, one hour behind the food track so the two never share a collection window. Windows, thresholds and note types match the food track exactly; only the words and the subject differ.",
+  "groups": [
+    ["AI编程", "AI Agent"],
+    ["AI落地", "大模型应用"],
+    ["Claude Code", "Cursor"],
+    ["智能体开发", "AI工具"]
+  ],
+  "pagesPerQuery": 1,
+  "noteTypes": ["视频笔记", "普通笔记"],
+  "coverageNotice": "基于当轮关键词与页数发现选题，未覆盖小红书全部内容。",
+  "dailySweep": {
+    "selection": "Once a day at 07:00 Beijing time, an hour behind the food sweep. Same shape as the food track: priority keywords first and video notes only, then the rest. Results only feed the today board.",
+    "priorityKeywords": ["AI编程", "AI Agent", "Claude Code", "AI落地", "Cursor", "AI工具", "大模型应用", "智能体开发"],
+    "prioritySource": "2026-09-15 paid probe of 13 keywords (24 requests, results in .local/fde-probe-20260915/). Ranked by median likes on the first page over all time: AI编程 984, AI Agent 732, AI落地 399, Claude Code 301; every other word fell below 100. Only AI编程 was verified to return a genuinely fresh first page under 一天内 (20 of 20 notes at most one day old); AI Agent returned 1 of 20, the rest 27 to 509 days old, so the platform's window filter silently falls back to all-time results when a keyword has too few fresh notes. Board membership is decided locally from each note's own publish time, so a stale result can never enter a board — it only costs the round some ordering.",
+    "source": "Same probe. The literal role words (FDE 84, 前向部署工程师 37, 解决方案工程师 21 median likes) are kept in the sweep for coverage but are not priority words: the volume in this niche sits in AI engineering practice, not in the job title.",
+    "keywords": ["AI编程", "AI Agent", "AI落地", "大模型应用", "Claude Code", "Cursor", "智能体开发", "AI工具", "FDE", "前向部署工程师", "交付工程师", "解决方案工程师", "售前工程师", "企业AI", "私有化部署", "RAG", "向量数据库", "提示词工程", "大模型微调", "模型部署", "AI应用开发", "AI产品经理", "程序员转型", "转行AI", "AI求职", "独立开发", "AI创业", "出海产品", "B端产品", "企业数字化", "技术咨询", "vibe coding", "Claude", "ChatGPT应用", "Coze", "Dify", "n8n", "工作流自动化", "AI自动化", "MCP", "Agent框架", "LangChain", "AI编程工具", "Copilot", "开发效率"],
+    "pagesPerQuery": 1,
+    "noteType": "不限",
+    "timeFilter": "一天内",
+    "coverageNotice": "今日热榜来自每天 07:00 的关键词搜索，未覆盖小红书全部内容。"
+  }
+}

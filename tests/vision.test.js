@@ -22,12 +22,12 @@ test('the model request contains actual JPEG data and the direct API token field
   assert.equal(body.tools, undefined); assert.equal(body.stream, false);
 });
 test('visual decisions require actual frame references and preparation or recipe evidence', () => {
-  assert.equal(parseVisualJudgment(JSON.stringify(cooking), frames).verdict, 'cooking');
+  assert.equal(parseVisualJudgment(JSON.stringify(cooking), frames).verdict, 'on_topic');
   for (const patch of [{ evidence: [] }, { evidence: [{ frame: 7, observation: '搅拌食材' }] },
     { evidence: [{ frame: 1, observation: '成品看起来好吃' }, { frame: 2, observation: '拿着成品展示' }] }, { tools: ['publish'] }])
     assert.equal(parseVisualJudgment(JSON.stringify({ ...cooking, ...patch }), frames).verdict, 'error');
   assert.equal(parseVisualJudgment('{"verdict":"uncertain","evidenceType":"none","evidence":[]}', frames).verdict, 'uncertain');
-  assert.equal(parseVisualJudgment(JSON.stringify({ verdict: 'cooking', evidenceType: 'recipe', evidence: [{ frame: 2, observation: '配方写着面粉200克' }] }), frames).verdict, 'cooking');
+  assert.equal(parseVisualJudgment(JSON.stringify({ verdict: 'cooking', evidenceType: 'recipe', evidence: [{ frame: 2, observation: '配方写着面粉200克' }] }), frames).verdict, 'on_topic');
 });
 test('unsupported or changed price pages cannot enable a paid visual request', async () => {
   const ok = '<p>vita-video-3.0（最新模型） 1.2元/百万 token 3.5元/百万 token</p>';
@@ -42,7 +42,7 @@ test('real dispatch is reserved first and a repeated completed request is not se
       assert.match(JSON.parse(options.body).messages[0].content[0].image_url.url, /^data:/);
       return Response.json({ model: MODEL, choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(cooking) } }], usage: { prompt_tokens: 1000, completion_tokens: 100, total_tokens: 1100 } });
     } };
-  assert.equal((await classifyFrames(args)).verdict, 'cooking'); assert.equal((await classifyFrames(args)).reused, true);
+  assert.equal((await classifyFrames(args)).verdict, 'on_topic'); assert.equal((await classifyFrames(args)).reused, true);
   assert.equal(calls, 1);
   await assert.rejects(() => classifyFrames({ ...args, settings: { ...settings, enabled: false } }), /VISION_DISABLED/);
   assert.equal(calls, 1);

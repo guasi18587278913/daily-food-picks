@@ -10,7 +10,7 @@ const { boards, card, UNCONFIRMED_REASON } = require('../miniprogram/lib/view');
 const { claimLease } = require('../cloudfunctions/collectTick/lib/budget');
 const { readSnapshot, publish } = require('../cloudfunctions/collectTick/lib/publisher');
 const id = n => n.toString(16).padStart(24, '0');
-const base = { enabled: true, freeAiConfirmed: true, dailyCalls: 50, dailyMicroUsd: 500000,
+const base = { enabled: true, freeAiConfirmed: true, dailyCalls: 100, dailyMicroUsd: 1000000,
   validationCalls: 20, validationMicroUsd: 200000, maxAiCallsPerRound: 20, discoveryMode: 'adaptive',
   vision: { enabled: false, dailyMicroCny: 500000, roundCalls: 3, validationCalls: 6, validationMicroCny: 200000 } };
 const raw = (n, patch = {}) => ({ id: id(n), user: { userid: id(100 + n), nickname: `作者${n}` }, type: 'video',
@@ -25,12 +25,12 @@ test('a rejection must quote an exclusion cue, whichever field it came from', ()
   assert.equal(vague.verdict, 'uncertain'); assert.equal(vague.reason, 'exclusion_without_cue');
   const cued = note({ desc: '今天带你探店这家川菜馆，全程没下厨。' });
   const real = parseJudgment(JSON.stringify({ verdict: 'not_cooking', evidence: '今天带你探店这家川菜馆', evidenceSource: 'desc' }), cued);
-  assert.equal(real.verdict, 'not_cooking');
+  assert.equal(real.verdict, 'off_topic');
   const petAd = note({ desc: '喵铮铮这款猫条有香香乳鸽莓莓。' });
-  assert.equal(parseJudgment(JSON.stringify({ verdict: 'not_cooking', evidence: '喵铮铮这款猫条', evidenceSource: 'desc' }), petAd).verdict, 'not_cooking');
+  assert.equal(parseJudgment(JSON.stringify({ verdict: 'not_cooking', evidence: '喵铮铮这款猫条', evidenceSource: 'desc' }), petAd).verdict, 'off_topic');
   // A cooking verdict keeps its own evidence rules.
   const recipe = note({ desc: '鸡蛋2个加水搅匀，蒸十分钟。' });
-  assert.equal(parseJudgment(JSON.stringify({ verdict: 'cooking', evidence: '鸡蛋2个加水搅匀', evidenceSource: 'desc' }), recipe).verdict, 'cooking');
+  assert.equal(parseJudgment(JSON.stringify({ verdict: 'cooking', evidence: '鸡蛋2个加水搅匀', evidenceSource: 'desc' }), recipe).verdict, 'on_topic');
 });
 
 function setup({ items, generate, visionError = false, vision = false }) {
@@ -104,7 +104,7 @@ test('works inspected before the tiers existed still publish on their verdict al
   const round = { id: '20260912-0900', scheduledAt: NOW - 120000, validation: false };
   await store.put('dfp_rounds', round.id, { status: 'running' });
   const legacy = { noteId: id(9), authorId: id(19), title: '蒸蛋', type: 'normal', likes: 2000, boards: ['today'],
-    judgment: { verdict: 'cooking', evidence: '加水蒸熟' } };
+    judgment: { verdict: 'on_topic', evidence: '加水蒸熟' } };
   assert.equal(contentTier(legacy), 'confirmed');
   assert.equal(contentTier({ ...legacy, judgment: { verdict: 'uncertain' } }), null);
   assert.equal(contentTier({ ...legacy, contentStatus: 'unconfirmed', judgment: { verdict: 'uncertain' } }), 'unconfirmed');
@@ -160,9 +160,9 @@ test('an unconfirmed work costs no author baseline and no profile lookup', async
 test('exclusion cues name the thing excluded and do not fire inside dish names', () => {
   const rejection = (desc, evidence) => parseJudgment(JSON.stringify({ verdict: 'not_cooking', evidence, evidenceSource: 'desc' }),
     note({ desc })).verdict;
-  assert.equal(rejection('喵铮铮这款猫条有香香乳鸽。', '喵铮铮这款猫条'), 'not_cooking');
-  assert.equal(rejection('今天带你探店这家川菜馆。', '今天带你探店这家川菜馆'), 'not_cooking');
-  assert.equal(rejection('记录旅行途中的市集。', '记录旅行途中的市集'), 'not_cooking');
+  assert.equal(rejection('喵铮铮这款猫条有香香乳鸽。', '喵铮铮这款猫条'), 'off_topic');
+  assert.equal(rejection('今天带你探店这家川菜馆。', '今天带你探店这家川菜馆'), 'off_topic');
+  assert.equal(rejection('记录旅行途中的市集。', '记录旅行途中的市集'), 'off_topic');
   // Dish names that used to read as pet or shopping content.
   assert.equal(rejection('猫耳朵面片的做法，手擀。', '猫耳朵面片的做法'), 'uncertain');
   assert.equal(rejection('狗不理包子复刻，十八个褶。', '狗不理包子复刻'), 'uncertain');

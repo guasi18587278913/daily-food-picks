@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { MemoryStore, NOW, PRICE } = require('./helpers');
 const { runTick, prioritizeCandidates } = require('../cloudfunctions/collectTick/lib/runner');
 const id = '000000000000000000000001';
-const config = { enabled: true, freeAiConfirmed: true, dailyCalls: 50, dailyMicroUsd: 500000,
+const config = { enabled: true, freeAiConfirmed: true, dailyCalls: 100, dailyMicroUsd: 1000000,
   validationCalls: 20, validationMicroUsd: 200000, maxAiCallsPerRound: 20 };
 test('disabled collectors do no provider or model work', async () => {
   let called = 0;
