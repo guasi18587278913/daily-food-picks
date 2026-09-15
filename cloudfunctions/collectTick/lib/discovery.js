@@ -18,6 +18,7 @@ function source(kind, params, label, origin = kind, now = 0) {
 }
 function jobFor(seed, round) {
   let params = { ...seed.params };
+  if (seed.kind === 'topic' && round.kind === 'sweep' && round.discoveryAllocation === 'candidate-reserve-v1') params.sort = 'time';
   if (seed.kind === 'search') params = { keyword: seed.params.keyword, note_type: seed.params.note_type || '不限',
     page: 1, sort_type: 'popularity_descending', time_filter: round.kind === 'sweep' ? '一天内' : '一周内',
     source: 'explore_feed', ai_mode: 0 };
@@ -51,7 +52,7 @@ class Discovery {
     }
     const sources = await this.store.list('dfp_results', { limit: POLICY.maxSources, filters: { recordType: 'discovery_source' } });
     sources.forEach(s => this.sources.set(s.key, s));
-    if (this.progress.discovery) return;
+    if (this.progress.discovery) { this.progress.discovery.candidateCount = this.ids.size; return; }
     if (!sources.length) {
       const old = await this.store.list('dfp_notes', { limit: 20, descending: true });
       for (const { note } of old) if (note?.authorId) await this.remember(source('author', { user_id: note.authorId }, note.author, 'author', this.clock()));
@@ -73,7 +74,7 @@ class Discovery {
     const firstContent = !explore && ranked.find(s => ['search', 'topic', 'author'].includes(s.kind)) || fixed[0];
     const seeds = [firstContent, meta, ...ranked, ...fixed];
     this.progress.discovery = { jobs: [], index: 0, done: false, successfulContent: 0, freshContent: 0,
-      successfulMetadata: 0, cacheHits: 0, relatedCandidates: 0, stopReason: null };
+      successfulMetadata: 0, cacheHits: 0, relatedCandidates: 0, candidateCount: this.ids.size, stopReason: null };
     for (const seed of seeds) { await this.remember(seed); this.enqueue(seed); }
   }
   enqueue(seed, next = false) {
@@ -140,6 +141,7 @@ class Discovery {
       });
       if (!old) {
         this.ids.add(note.noteId);
+        this.progress.discovery.candidateCount = this.ids.size;
         if (Array.isArray(this.progress.candidateIds) && !this.progress.candidateIds.includes(note.noteId)) this.progress.candidateIds.push(note.noteId);
         if (related) this.progress.discovery.relatedCandidates++;
       }
@@ -156,8 +158,24 @@ class Discovery {
     const state = this.progress.discovery;
     if (state.done) return false;
     const target = this.round.candidateTarget || POLICY.candidateTarget[this.round.kind];
+    const dynamic = this.round.discoveryAllocation === 'candidate-reserve-v1';
+    if (dynamic && this.clock() >= this.round.closesAt - 300000) {
+      state.done = true; state.stopReason = 'inspection_time_reserve'; return false;
+    }
+    if (dynamic && state.index >= state.jobs.length && this.ids.size < target) {
+      // Continue unused, type-specific searches only when the first source batch was too sparse.
+      const words = this.round.kind === 'sweep' ? KEYWORDS.dailySweep.keywords : [...new Set(KEYWORDS.groups.flat())];
+      for (const word of words) for (const note_type of ['视频笔记', '普通笔记']) {
+        if (state.jobs.length >= POLICY.maxTasks) break;
+        const seed = source('search', { keyword: word, note_type }, word, 'keyword', this.clock());
+        const previousSize = state.jobs.length;
+        this.enqueue(seed);
+        if (state.jobs.length > previousSize) await this.remember(seed);
+      }
+    }
     if (state.index >= state.jobs.length || (this.ids.size >= target && state.freshContent > 0)) {
-      state.done = true; state.stopReason = state.index >= state.jobs.length ? 'exhausted' : 'candidate_target'; return false;
+      state.done = true; state.stopReason = state.index >= state.jobs.length
+        ? state.jobs.length >= POLICY.maxTasks ? 'task_cap' : 'exhausted' : 'candidate_target'; return false;
     }
     const job = state.jobs[state.index];
     if (job.kind === 'faved') {
@@ -189,7 +207,9 @@ class Discovery {
       }
       job.status = 'complete';
     } catch (e) {
-      if (e.code === 'DISCOVERY_BUDGET') { state.done = true; state.stopReason = 'discovery_budget'; return false; }
+      if (['DISCOVERY_BUDGET', 'DISCOVERY_INSPECTION_RESERVE'].includes(e.code)) {
+        state.done = true; state.stopReason = e.code === 'DISCOVERY_BUDGET' ? 'discovery_budget' : 'inspection_reserve'; return false;
+      }
       if (['TICK_LIMIT', 'DAILY_BUDGET', 'ROUND_BUDGET', 'VALIDATION_BUDGET', 'SUPPLEMENT_BUDGET', 'PROVIDER_AUTH', 'LEASE_EXPIRED'].includes(e.code)) throw e;
       job.status = 'failed'; job.errorCode = e.code || 'REQUEST_FAILED';
       if (!this.progress.gaps.includes('REQUEST_FAILED')) this.progress.gaps.push('REQUEST_FAILED');

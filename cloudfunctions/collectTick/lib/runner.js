@@ -1,4 +1,5 @@
 'use strict';
+const { ensureAuthorProfile } = require('./author-profiles');
 
 const { randomUUID } = require('node:crypto');
 const { claimLease, releaseLease, assertLease, validatePrice } = require('./budget');
@@ -90,6 +91,8 @@ const REASONS = {
   CARRY_UNAVAILABLE: '今天 06:00 的今日新锐读取失败，本轮只展示新找到的选题。',
   CACHE_UNAVAILABLE: '部分复用数据不可用，已保留完成的检查结果。',
   VISION_UNAVAILABLE: '视频画面复核暂不可用，部分视频尚未确认。',
+  VISION_OUTPUT_INVALID: '部分视频的判断结果缺少有效证据，尚未确认。',
+  VISION_OUTPUT_TRUNCATED: '部分视频的判断结果未完整返回，尚未确认。',
   VISION_BUDGET: '视频画面复核额度已用完，部分视频尚未确认。',
   VIDEO_UNAVAILABLE: '部分视频画面无法读取，尚未确认其制作内容。'
 };
@@ -139,8 +142,9 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
   }
   // A rejected query does not erase completed searches. Total provider failure or an unavailable
   // classifier still retains the old snapshot; partial discovery can publish an honest zero result.
-  const serviceFailed = ['PROVIDER_AUTH', 'MODEL_UNAVAILABLE', 'VISION_UNAVAILABLE'].includes(reason)
-    || gaps.includes('VISION_UNAVAILABLE') || gaps.includes('MODEL_UNAVAILABLE');
+  const judgmentFailures = ['MODEL_UNAVAILABLE', 'VISION_UNAVAILABLE', 'VISION_OUTPUT_INVALID', 'VISION_OUTPUT_TRUNCATED'];
+  const serviceFailed = ['PROVIDER_AUTH', ...judgmentFailures].includes(reason)
+    || gaps.some(gap => judgmentFailures.includes(gap));
   if (!notes.length && (!progress.successfulSearches || serviceFailed)) {
     const status = finishStatus(reason);
     await store.transaction(async tx => {
@@ -309,7 +313,13 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           try {
             const result = await review({ store, lease, round, note: row.note, settings: config.vision, key: visionKey, clock });
             if (result.cacheWarning) progress.gaps.push(result.cacheWarning);
-            if (result.verdict === 'error') throw error(result.reason || 'VISION_UNAVAILABLE');
+            if (result.verdict === 'error') {
+              const failure = error(result.reason || 'VISION_UNAVAILABLE');
+              failure.validationIssue = result.validationIssue;
+              failure.attemptId = result.attemptId;
+              failure.httpStatus = result.httpStatus;
+              throw failure;
+            }
             if (result.cached) progress.visionCacheHits = (progress.visionCacheHits || 0) + 1;
             else progress.visionChecked = (progress.visionChecked || 0) + 1;
             row.note.judgment = result;
@@ -318,8 +328,15 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
             if (discovery && row.stage === 'history') await discovery.rememberCooking(row.note);
           } catch (e) {
             if (e.code === 'LEASE_EXPIRED') throw e;
-            const gap = /VISION_.*BUDGET/.test(e.code) ? 'VISION_BUDGET' : /^VIDEO_/.test(e.code) ? 'VIDEO_UNAVAILABLE' : 'VISION_UNAVAILABLE';
+            const gap = ['VISION_OUTPUT_INVALID', 'VISION_OUTPUT_TRUNCATED'].includes(e.code) ? e.code
+              : /VISION_.*BUDGET/.test(e.code) ? 'VISION_BUDGET' : /^VIDEO_/.test(e.code) ? 'VIDEO_UNAVAILABLE' : 'VISION_UNAVAILABLE';
             progress.gaps.push(gap); row.stage = 'skipped'; row.outcome = 'incomplete'; row.errorCode = gap;
+            row.visualDiagnostics = {
+              code: typeof e.code === 'string' && /^(?:VISION|VIDEO)_[A-Z_]{1,60}$/.test(e.code) ? e.code : 'VISION_UNAVAILABLE',
+              validationIssue: typeof e.validationIssue === 'string' && /^[A-Z_]{1,60}$/.test(e.validationIssue) ? e.validationIssue : null,
+              attemptId: typeof e.attemptId === 'string' && /^vision_[a-f0-9]{48}$/.test(e.attemptId) ? e.attemptId : null,
+              httpStatus: Number.isInteger(e.httpStatus) && e.httpStatus >= 100 && e.httpStatus <= 599 ? e.httpStatus : null
+            };
           }
           await save(); await saveProgress(store, lease, round.id, progress, clock);
         } else if (row.stage === 'judging') {
@@ -359,6 +376,20 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           row.note.fanRatio = Number.isSafeInteger(row.note.fans) && row.note.fans > 0 ? Math.round(row.note.likes / row.note.fans * 10) / 10 : null;
           row.stage = 'cover'; await save();
         } else if (row.stage === 'cover') {
+          // Optional enrichment must not prevent a verified work from reaching publication.
+          if (!row.authorProfileChecked && row.note.boards?.length && clock() < deadline - 65000
+            && clock() < round.closesAt - 65000) {
+            try {
+              const profile = await ensureAuthorProfile({ store, lease, provider, note: row.note, clock });
+              row.authorProfileStatus = profile.status;
+            } catch (profileError) {
+              if (profileError.code === 'LEASE_EXPIRED') throw profileError;
+              row.authorProfileStatus = 'unavailable';
+              row.authorProfileIssue = ['TICK_LIMIT', 'DAILY_BUDGET', 'ROUND_BUDGET', 'PROVIDER_AUTH', 'REQUEST_UNCERTAIN'].includes(profileError.code)
+                ? profileError.code : 'AUTHOR_PROFILE_UNAVAILABLE';
+            }
+            row.authorProfileChecked = true; await save();
+          }
           row.note.fileId = upload ? await storeCover({ store, upload, note: row.note,
             report: issue => { row.coverIssue = issue; } }) : null;
           if (!row.note.fileId && row.note.coverUrl) progress.gaps.push('COVER_UNAVAILABLE');

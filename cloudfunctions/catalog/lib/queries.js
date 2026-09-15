@@ -1,4 +1,5 @@
 'use strict';
+const { authorId, authorNavigationFor } = require('./author-navigation');
 const { capturedNote, contentFor, sourceMediaUrl } = require('./content');
 const { createHash } = require('node:crypto');
 const { authorize } = require('./access');
@@ -116,7 +117,12 @@ function createCatalog({ store, config, sign = async () => [], clock = Date.now 
         if (!note) fail('NOT_FOUND');
         const captured = await capturedNote(store, note);
         const [decorated] = await decorate([note], new Map([[note.noteId, captured]]));
-        data = { note: decorated, content: contentFor(captured) };
+        let authorNavigation = null;
+        if (authorId(note.authorId)) {
+          try { authorNavigation = authorNavigationFor(await store.get('dfp_results', `author_profile_${note.authorId}`), note.authorId, clock()); }
+          catch { /* The captured work remains readable when its optional profile cache is unavailable. */ }
+        }
+        data = { note: { ...decorated, authorNavigation }, content: contentFor(captured) };
       } else if (event.action === 'getNotes') {
         if (!Array.isArray(event.noteIds) || event.noteIds.length > 50 || event.noteIds.some(x => typeof x !== 'string' || !NOTE_ID.test(x))) fail('INVALID_ARGUMENT');
         const notes = []; const missing = [];

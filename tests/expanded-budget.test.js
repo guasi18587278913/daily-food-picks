@@ -7,7 +7,8 @@ const env={DFP_ENABLED:'true',DFP_FREE_AI_CONFIRMED:'true',DFP_TIMER_SECRET:'a'.
  DFP_SWEEP_CALLS:'100',DFP_VALIDATION_CALLS:'20',DFP_VALIDATION_MICRO_USD:'200000',DFP_DISCOVERY_MODE:'adaptive',DFP_BUDGET_TIER:'expanded250'};
 test('explicit expanded tier allocates 100/50/50/50; old configuration cannot silently expand',()=>{
  const config=loadConfig(env);assert.deepEqual([6,9,12,20].map(h=>scheduledRound(Date.parse(`2026-09-12T${String(h).padStart(2,'0')}:00:00+08:00`),config).roundCalls),[100,50,50,50]);
- assert.equal(scheduledRound(NOW,config).discoveryLimit,8);
+ assert.equal(scheduledRound(NOW,config).discoveryAllocation,'candidate-reserve-v1');
+ assert.equal(scheduledRound(NOW,config).discoveryLimit,undefined);
  assert.throws(()=>loadConfig({...env,DFP_BUDGET_TIER:''}),/CONFIGURATION/);
  assert.throws(()=>loadConfig({...env,DFP_DAILY_CALLS:'251'}),/CONFIGURATION/);
 });

@@ -4,7 +4,7 @@ const { digest, readLimited } = require('./provider');
 const { PRICE_URL, MODEL, TOTAL_TOKENS, OUTPUT_TOKENS, validatePrice,
   reserveVision, markVisionInflight, finishVision } = require('./vision-budget');
 const ENDPOINT = 'https://api.vita.cloud.tencent.com/v1/video2text/chat/completions';
-const VERSION = 'food-vision-3-separate-frames';
+const VERSION = 'food-vision-4-explicit-evidence';
 function fail(code) { const e = new Error(code); e.code = code; throw e; }
 async function verifyVisionPrice(fetcher = fetch, now = Date.now()) {
   const response = await fetcher(PRICE_URL, { redirect: 'error', signal: AbortSignal.timeout(15000), headers: { 'User-Agent': 'Mozilla/5.0' } });
@@ -29,29 +29,29 @@ function validateFrames(frames) {
     || bytes[0] !== 0xff || bytes[1] !== 0xd8 || createHash('sha256').update(bytes).digest('hex') !== frames.samples[i].sha256) fail('VISION_FRAMES_INVALID');
 }
 function parseVisualJudgment(raw, frames) {
-  const invalid = { verdict: 'error', reason: 'VISION_OUTPUT_INVALID', evidence: [] };
+  const invalid = validationIssue => ({ verdict: 'error', reason: 'VISION_OUTPUT_INVALID', validationIssue, evidence: [] });
   try {
-    if (typeof raw !== 'string' || raw.length > 8000) return invalid;
+    if (typeof raw !== 'string' || raw.length > 8000) return invalid('CONTENT_SHAPE');
     const result = JSON.parse(raw.trim().replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, ''));
     if (!result || Object.keys(result).some(k => !['verdict', 'evidenceType', 'evidence'].includes(k))
       || !['cooking', 'not_cooking', 'uncertain'].includes(result.verdict) || !Array.isArray(result.evidence)
-      || result.evidence.length > 6) return invalid;
+      || result.evidence.length > 6) return invalid('SCHEMA_INVALID');
     if (result.evidence.some(e => !e || Object.keys(e).some(k => !['frame', 'observation'].includes(k))
       || !Number.isInteger(e.frame) || e.frame < 1 || e.frame > frames.frameCount
-      || typeof e.observation !== 'string' || e.observation.trim().length < 3 || e.observation.length > 180)) return invalid;
-    if (result.verdict !== 'uncertain' && !result.evidence.length) return invalid;
+      || typeof e.observation !== 'string' || e.observation.trim().length < 3 || e.observation.length > 180)) return invalid('EVIDENCE_INVALID');
+    if (result.verdict !== 'uncertain' && !result.evidence.length) return invalid('EVIDENCE_MISSING');
     if (result.verdict === 'cooking') {
       if (result.evidenceType === 'preparation') {
-        if (new Set(result.evidence.map(e => e.frame)).size < 2) return invalid;
-        if (new Set(result.evidence.map(e => frames.samples[e.frame - 1]?.sha256)).size < 2) return invalid;
-        if (!result.evidence.some(e => /切|搅|拌|混合|揉|包|煮|炒|蒸|煎|烤|焖|炖|发酵|腌|加热/.test(e.observation))) return invalid;
+        if (new Set(result.evidence.map(e => e.frame)).size < 2) return invalid('PREPARATION_FRAMES');
+        if (new Set(result.evidence.map(e => frames.samples[e.frame - 1]?.sha256)).size < 2) return invalid('DUPLICATE_FRAMES');
+        if (!result.evidence.some(e => /切|搅|拌|混合|揉|包|煮|炒|蒸|煎|烤|焖|炖|发酵|腌|加热/.test(e.observation))) return invalid('PREPARATION_ACTION_MISSING');
       } else if (result.evidenceType === 'recipe') {
-        if (!result.evidence.some(e => /\d+(?:\.\d+)?\s*(?:克|g|毫升|ml|勺|个|分钟|度)/i.test(e.observation))) return invalid;
-      } else return invalid;
+        if (!result.evidence.some(e => /\d+(?:\.\d+)?\s*(?:克|g|毫升|ml|勺|个|分钟|度)/i.test(e.observation))) return invalid('RECIPE_QUANTITY_MISSING');
+      } else return invalid('EVIDENCE_TYPE_INVALID');
     }
     return { verdict: result.verdict, evidenceType: result.evidenceType || null,
       evidence: result.evidence, reason: null, evidenceSource: 'frames', model: MODEL, version: VERSION };
-  } catch { return invalid; }
+  } catch { return invalid('JSON_INVALID'); }
 }
 function requestBody(note, frames, imageUrl) {
   validateFrames(frames);
@@ -67,7 +67,8 @@ function requestBody(note, frames, imageUrl) {
     + '不可仅因标题说教程而放行，不编造看不到的步骤。不评价减重、健康或机构推荐是否真实。'
     + '只返回JSON：{"verdict":"cooking|not_cooking|uncertain","evidenceType":"preparation|recipe|exclusion|none",'
     + '"evidence":[{"frame":1,"observation":"这一帧实际看到的操作或配方，最多80字"}]}。'
-    + 'preparation至少引用两个不同帧；recipe至少引用一项看得清的原料用量。uncertain可给空证据。'
+    + '枚举字段只选一个英文值，不输出竖线或多个选项，不添加说明文字。preparation至少引用两个不同帧；recipe至少引用一项看得清的原料用量。'
+    + 'not_cooking也必须列出至少一帧可见的排除依据；缺乏依据时选择uncertain，不要猜。仅uncertain允许空证据，其完整返回示例为{"verdict":"uncertain","evidenceType":"none","evidence":[]}。'
     + `辅助标题（非证据）：${String(note.title || '').slice(0, 200)}`;
   return { model: MODEL, stream: false, max_tokens: TOTAL_TOKENS, max_completion_tokens: OUTPUT_TOKENS,
     messages: [{ role: 'user', content: [...frames.images.map(bytes => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${bytes.toString('base64')}` } })),
@@ -82,8 +83,8 @@ async function classifyFrames({ store, lease, roundId, scope = 'round', note, fr
   const inputKey = digest([VERSION, MODEL, note.noteId, note.title, note.desc, frames.mediaIdentity, frames.imageHash,
     frames.samples.map(frame => frame.sha256), frames.samplerVersion, 'base64-separate-frames']);
   const record = await reserveVision(store, { lease, scope, roundId, key: inputKey, now: clock(), settings, price });
-  if (record.reused) return record.status === 'received' && record.result ? { ...record.result, reused: true, attemptId: record.id }
-    : { verdict: 'error', reason: record.errorCode || 'VISION_REQUEST_UNCERTAIN', attemptId: record.id };
+  if (record.reused) return record.status === 'received' && record.result ? { ...record.result, reused: true, attemptId: record.id, httpStatus: record.httpStatus }
+    : { verdict: 'error', reason: record.errorCode || 'VISION_REQUEST_UNCERTAIN', attemptId: record.id, httpStatus: record.httpStatus };
   await markVisionInflight(store, record.id, lease, clock());
   let outcome;
   try {
@@ -95,14 +96,14 @@ async function classifyFrames({ store, lease, roundId, scope = 'round', note, fr
       let payload; try { payload = JSON.parse(await readLimited(response, 256000)); } catch { fail('VISION_RESPONSE_INVALID'); }
       const choice = payload.choices?.[0];
       const result = payload.choices?.length !== 1 || choice?.finish_reason !== 'stop' || choice?.message?.tool_calls
-        ? { verdict: 'error', reason: choice?.finish_reason === 'length' ? 'VISION_OUTPUT_TRUNCATED' : 'VISION_OUTPUT_INVALID', evidence: [] }
+        ? { verdict: 'error', reason: choice?.finish_reason === 'length' ? 'VISION_OUTPUT_TRUNCATED' : 'VISION_OUTPUT_INVALID', validationIssue: 'COMPLETION_SHAPE', evidence: [] }
         : parseVisualJudgment(choice?.message?.content, frames);
       outcome = { status: 'received', httpStatus: response.status, usage: payload.usage, result,
         ...(payload.model !== MODEL ? { contractError: 'VISION_MODEL_MISMATCH' } : {}) };
     }
-  } catch (e) { outcome = { status: 'unknown', errorCode: e.code || 'VISION_TRANSPORT_ERROR' }; }
+  } catch (e) { outcome = { status: 'unknown', errorCode: ['TimeoutError', 'AbortError'].includes(e.name) ? 'VISION_TIMEOUT' : e.code || 'VISION_TRANSPORT_ERROR' }; }
   const settled = await finishVision(store, record.id, lease, outcome, clock());
-  return settled.result ? { ...settled.result, attemptId: record.id, actualMicroCny: settled.actualMicroCny }
-    : { verdict: 'error', reason: settled.errorCode || 'VISION_UNAVAILABLE', attemptId: record.id };
+  return settled.result ? { ...settled.result, attemptId: record.id, actualMicroCny: settled.actualMicroCny, httpStatus: settled.httpStatus }
+    : { verdict: 'error', reason: settled.errorCode || 'VISION_UNAVAILABLE', attemptId: record.id, httpStatus: settled.httpStatus };
 }
 module.exports = { ENDPOINT, VERSION, verifyVisionPrice, validateFrames, parseVisualJudgment, requestBody, classifyFrames };

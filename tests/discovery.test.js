@@ -111,3 +111,22 @@ test('new active sources replace old statistics when the bounded learning histor
  const stats=(await ctx.store.get('dfp_results','source_statistics_v1')).sources;
  assert.equal(Object.keys(stats).length,100);assert.equal(stats[key]?.requests,1);
 });
+test('new sweep topics use time order while accepted old definitions retain their behavior',()=>{
+ const seed=source('topic',{page_id:id(7),sort:'trend'},'美食','topic',NOW);
+ assert.equal(jobFor(seed,{kind:'sweep',discoveryAllocation:'candidate-reserve-v1'}).params.sort,'time');
+ assert.equal(jobFor(seed,{kind:'sweep'}).params.sort,'trend');
+});
+test('sparse exhausted queues append unused type-specific searches and restore candidate counts without duplication',async()=>{
+ const x=await setup();Object.assign(x.round,{discoveryAllocation:'candidate-reserve-v1',closesAt:NOW+1200000});
+ x.progress.discovery.jobs=[];let calls=0;const provider={request:async()=>{calls++;return{notes:[note(1)]};},notes:async r=>r.notes};
+ await x.discovery.step(provider);assert.equal(calls,1);assert.equal(x.progress.discovery.candidateCount,1);assert.ok(x.progress.discovery.jobs.length>4);assert.ok(x.progress.discovery.jobs.length<=64);
+ assert.deepEqual(x.progress.discovery.jobs.slice(0,2).map(j=>j.params.note_type),['视频笔记','普通笔记']);
+ for(const job of x.progress.discovery.jobs) assert.equal((await x.store.get('dfp_results',job.sourceKey))?.recordType,'discovery_source');
+ const size=x.progress.discovery.jobs.length;x.progress.discovery.candidateCount=0;const resumed=new Discovery({...x,clock:()=>NOW});await resumed.init();assert.equal(x.progress.discovery.candidateCount,1);assert.equal(x.progress.discovery.jobs.length,size);
+});
+test('time or budget reserved for inspection ends discovery without marking a provider failure',async()=>{
+ const x=await setup();Object.assign(x.round,{discoveryAllocation:'candidate-reserve-v1',closesAt:NOW+300000});
+ await x.discovery.step({request:()=>assert.fail('no discovery at time boundary')});assert.equal(x.progress.discovery.stopReason,'inspection_time_reserve');
+ const y=await setup();Object.assign(y.round,{discoveryAllocation:'candidate-reserve-v1',closesAt:NOW+1200000});
+ await y.discovery.step({request:async()=>{throw Object.assign(Error('reserved'),{code:'DISCOVERY_INSPECTION_RESERVE'});}});assert.equal(y.progress.discovery.stopReason,'inspection_reserve');assert.deepEqual(y.progress.gaps,[]);
+});

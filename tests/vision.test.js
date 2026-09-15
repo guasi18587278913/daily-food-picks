@@ -75,3 +75,9 @@ test('different evidence frame numbers cannot reuse the same image as two prepar
  const duplicate={...frames,samples:frames.samples.map((f,i)=>({...f,sha256:[1,3].includes(i)?'identical':`other-${i}`}))};
  assert.equal(parseVisualJudgment(JSON.stringify(cooking),duplicate).verdict,'error');
 });
+test('invalid visual output distinguishes format, evidence and frame errors without retaining raw text',()=>{
+ const raw='secret-looking unstructured response';const a=parseVisualJudgment(raw,frames);assert.equal(a.validationIssue,'JSON_INVALID');assert.equal(JSON.stringify(a).includes(raw),false);
+ assert.equal(parseVisualJudgment(JSON.stringify({...cooking,evidence:[]}),frames).validationIssue,'EVIDENCE_MISSING');
+ assert.equal(parseVisualJudgment(JSON.stringify({...cooking,evidence:[{frame:9,observation:'搅拌面糊'}]}),frames).validationIssue,'EVIDENCE_INVALID');
+ assert.equal(parseVisualJudgment(JSON.stringify({...cooking,evidence:[cooking.evidence[0]]}),frames).validationIssue,'PREPARATION_FRAMES');
+});

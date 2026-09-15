@@ -131,3 +131,10 @@ test('a crash after text reservation is counted conservatively once and never re
  await runTick(x.deps);assert.equal(calls,1);const r=await x.store.get('dfp_rounds','20260912-0900');assert.equal(r.progress.aiCalls,2);assert.equal(r.progress.textFailureStreak,2);
  await runTick(x.deps);assert.equal(calls,1);
 });
+test('invalid visual evidence retains the old snapshot and preserves safe attempt diagnostics',async()=>{
+ const x=setup();await x.store.put('dfp_state','latest',{snapshotId:'old'});
+ x.deps.review=async()=>({verdict:'error',reason:'VISION_OUTPUT_INVALID',validationIssue:'EVIDENCE_MISSING',attemptId:'vision_'+'a'.repeat(48),httpStatus:200});
+ assert.equal((await runTick(x.deps)).status,'failed');assert.equal((await x.store.get('dfp_state','latest')).snapshotId,'old');
+ const row=await x.store.get('dfp_candidates',`20260912-0900_${id(1)}`);assert.equal(row.errorCode,'VISION_OUTPUT_INVALID');assert.equal(row.outcome,'incomplete');assert.equal(row.visualDiagnostics.validationIssue,'EVIDENCE_MISSING');assert.equal(row.visualDiagnostics.httpStatus,200);assert.equal(row.visualDiagnostics.attemptId,'vision_'+'a'.repeat(48));
+ const round=await x.store.get('dfp_rounds','20260912-0900');assert.match(round.partialReason,/缺少有效证据/);assert.doesNotMatch(round.partialReason,/暂不可用/);
+});

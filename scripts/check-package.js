@@ -22,6 +22,9 @@ function walk(directory) {
 walk(mini);
 if (size >= 2 * 1024 * 1024) throw new Error('Mini program exceeds the 2 MiB main-package budget');
 for (const [a, b] of [
+  ['shared/author-navigation.js', 'miniprogram/lib/author-navigation.js'],
+  ['shared/author-navigation.js', 'cloudfunctions/catalog/lib/author-navigation.js'],
+  ['shared/author-navigation.js', 'cloudfunctions/collectTick/lib/author-navigation.js'],
   ['shared/source-navigation.js', 'miniprogram/lib/source-navigation.js'],
   ['shared/source-navigation.js', 'cloudfunctions/catalog/lib/source-navigation.js'],
   ['config/rules.json', 'cloudfunctions/collectTick/config/rules.json'],

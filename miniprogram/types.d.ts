@@ -1,6 +1,8 @@
 type BoardKey = 'today' | 'week' | 'dark';
 type SortKey = 'likes' | 'ratio' | 'fanRatio' | 'collected' | 'comments';
 interface FoodNote {
+  authorId?: string;
+  authorNavigation?: {authorId:string;token:string;source:string}|null;
   noteId: string;
   title: string;
   author: string;
