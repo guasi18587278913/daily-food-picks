@@ -139,3 +139,24 @@ test('invalid limits and arbitrary IDs are rejected without exposing internal er
     assert.equal((await api(event, ctx)).ok, false);
   }
 });
+
+test('a round carries its rising accounts on the first page only, and an older snapshot reports none', async () => {
+  const { api, store } = await setup();
+  const accounts = [{ authorId: id(7), author: '涨粉号', fans: 5300, fansBefore: 4000, fansDelta: 1300,
+    observedAt: '2026-09-15T04:00:00.000Z', baselineAt: '2026-09-12T04:00:00.000Z', spanHours: 72, notes: [] }];
+  const notes = Array.from({ length: 3 }, (_, i) => ({ noteId: id(20 + i), title: '蒸蛋', boards: ['saves'] }));
+  await store.put('dfp_parts', 'part-a', { notes });
+  const { digest } = require('../cloudfunctions/collectTick/lib/provider');
+  await store.put('dfp_snapshots', '20260913-0900-abcdefabcdef', { id: '20260913-0900-abcdefabcdef', published: true,
+    parts: [{ id: 'part-a', hash: digest(notes) }], count: 3, scheduledAt: '2026-09-13T01:00:00Z', status: 'complete',
+    boards: { today: 0, week: 0, saves: 3, rising: 1 }, accounts });
+  const first = await api({ action: 'getRound', snapshotId: '20260913-0900-abcdefabcdef', limit: 2 }, ctx);
+  assert.deepEqual(first.data.accounts, accounts);
+  assert.deepEqual(first.data.boards, { today: 0, week: 0, saves: 3, rising: 1 });
+  const second = await api({ action: 'getRound', snapshotId: '20260913-0900-abcdefabcdef', limit: 2, cursor: first.data.nextCursor }, ctx);
+  assert.deepEqual(second.data.accounts, []);
+  // A snapshot written before this feature has no accounts field and no rising count to report.
+  const legacy = await api({ action: 'getRound', snapshotId: '20260912-1000-abcdefabcdef' }, ctx);
+  assert.deepEqual(legacy.data.accounts, []);
+  assert.deepEqual(legacy.data.boards, { today: 0, week: 0, saves: 0, rising: 0 });
+});

@@ -14,8 +14,21 @@ async function previouslyPublished(store, noteId) {
 }
 function publicNote(note) {
   const keys = ['noteId', 'title', 'author', 'authorId', 'type', 'publishedAt', 'likes', 'collected', 'comments',
-    'shared', 'fans', 'baseline', 'ratio', 'fanRatio', 'baselineReason', 'sourceUrl', 'fileId', 'coverUrl', 'boards', 'firstRoundId'];
+    'shared', 'fans', 'baseline', 'ratio', 'fanRatio', 'collectRatio', 'baselineReason', 'sourceUrl', 'fileId', 'coverUrl', 'boards', 'firstRoundId'];
   return Object.fromEntries(keys.map(k => [k, note[k] ?? null]));
+}
+const BOARDS = ['today', 'week', 'saves', 'rising'];
+const metric = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
+// Only facts the page shows: identifiers, counts, times and up to three recent works by title.
+function publicAccount(account) {
+  if (!/^[0-9a-f]{24}$/.test(account?.authorId || '') || !Number.isSafeInteger(account.fansDelta)) return null;
+  const time = value => Number.isFinite(Date.parse(value)) ? new Date(Date.parse(value)).toISOString() : null;
+  return { authorId: account.authorId, author: typeof account.author === 'string' ? account.author.slice(0, 120) : null,
+    fans: metric(account.fans), fansBefore: metric(account.fansBefore), fansDelta: account.fansDelta,
+    observedAt: time(account.observedAt), baselineAt: time(account.baselineAt),
+    spanHours: Number.isSafeInteger(account.spanHours) ? account.spanHours : null,
+    notes: (Array.isArray(account.notes) ? account.notes : []).slice(0, 3).filter(n => /^[0-9a-f]{24}$/.test(n?.noteId || ''))
+      .map(n => ({ noteId: n.noteId, title: String(n.title || '').slice(0, 120), likes: metric(n.likes), collected: metric(n.collected), publishedAt: time(n.publishedAt) })) };
 }
 function splitParts(notes) {
   const parts = []; let rows = [];
@@ -40,7 +53,7 @@ async function readSnapshot(store, id) {
   if (notes.length !== snapshot.count) throw error('CORRUPT_SNAPSHOT');
   return { ...snapshot, notes };
 }
-async function publish({ store, lease, round, notes, carriedNotes = [], status, coverage, partialReason = '', successfulSearches, now, clock = Date.now }) {
+async function publish({ store, lease, round, notes, carriedNotes = [], accounts = [], status, coverage, partialReason = '', successfulSearches, now, clock = Date.now }) {
   const time = () => now ?? clock();
   if (!['complete', 'partial'].includes(status)) throw error('INVALID_STATUS');
   if (status === 'partial' && !partialReason.trim()) throw error('PARTIAL_REASON_REQUIRED');
@@ -55,7 +68,11 @@ async function publish({ store, lease, round, notes, carriedNotes = [], status, 
   // Carried notes were recommended by an earlier snapshot: shown again, but they get no new search rows or dedup references.
   const shown = new Map([...carriedNotes, ...unique].map(note => [note.noteId, publicNote(note)]));
   const visible = [...shown.values()].sort((a, b) => a.noteId.localeCompare(b.noteId));
-  const id = `${round.id}-${digest([visible, status, coverage, partialReason]).slice(0, 12)}`;
+  // The first entry for an author wins: the caller ranks them, so a later duplicate never rewrites what was chosen.
+  const byAuthor = new Map();
+  for (const account of accounts.map(publicAccount)) if (account && !byAuthor.has(account.authorId)) byAuthor.set(account.authorId, account);
+  const rising = [...byAuthor.values()].sort((a, b) => b.fansDelta - a.fansDelta || a.authorId.localeCompare(b.authorId));
+  const id = `${round.id}-${digest([visible, rising, status, coverage, partialReason]).slice(0, 12)}`;
   const existing = await store.get('dfp_snapshots', id);
   if (existing?.published) return existing;
   const parts = [];
@@ -68,8 +85,8 @@ async function publish({ store, lease, round, notes, carriedNotes = [], status, 
   }
   const snapshot = { id, roundId: round.id, scheduledAt: new Date(round.scheduledAt).toISOString(),
     finishedAt: new Date(time()).toISOString(), status, partialReason: partialReason || null, coverage,
-    count: visible.length, boards: Object.fromEntries(['today', 'week', 'dark'].map(board => [board, visible.filter(x => x.boards.includes(board)).length])),
-    parts, published: false };
+    count: visible.length, boards: { ...Object.fromEntries(BOARDS.map(board => [board, visible.filter(x => x.boards.includes(board)).length])), rising: rising.length },
+    accounts: rising, parts, published: false };
   await store.transaction(async tx => {
     await assertLease(tx, lease, time());
     const current = await tx.get('dfp_snapshots', id);
@@ -86,6 +103,7 @@ async function publish({ store, lease, round, notes, carriedNotes = [], status, 
     const current = await tx.get('dfp_rounds', round.id);
     if (current?.status !== 'running') throw error('ROUND_NOT_RUNNING');
     for (const note of unique) await tx.put('dfp_candidates', `published_${note.noteId}`, { snapshotId: id, indexId: `${id}_${note.noteId}` });
+    for (const account of rising) await tx.put('dfp_results', `rising_published_${account.authorId}`, { recordType: 'rising_published', snapshotId: id, at: time() });
     await tx.put('dfp_snapshots', id, { ...snapshot, published: true });
     await tx.put('dfp_rounds', round.id, { ...current, status, snapshotId: id, partialReason: partialReason || null, finishedAt: snapshot.finishedAt, coverage });
     await tx.put('dfp_state', 'latest', { snapshotId: id, revision: id, scheduledAt: snapshot.scheduledAt, finishedAt: snapshot.finishedAt });
@@ -130,4 +148,4 @@ async function storeCover({ store, upload, note, fetcher = fetch, report = () =>
   } catch { return issue(phase === 'upload' ? 'COVER_UPLOAD_FAILED' : 'COVER_DOWNLOAD_FAILED', httpStatus); }
 }
 
-module.exports = { publicNote, splitParts, isPublished, previouslyPublished, readSnapshot, publish, storeCover };
+module.exports = { BOARDS, publicNote, publicAccount, splitParts, isPublished, previouslyPublished, readSnapshot, publish, storeCover };

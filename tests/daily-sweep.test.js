@@ -182,7 +182,7 @@ test('the 06:00 sweep admits only today candidates and publishes them', async ()
   assert.deepEqual(candidates.map(x => x.note.noteId), [TODAY.noteId]);
   assert.equal(result.status, 'complete');
   const snapshot = await readSnapshot(store, result.snapshotId);
-  assert.deepEqual(snapshot.boards, { today: 1, week: 0, dark: 0 });
+  assert.deepEqual(snapshot.boards, { today: 1, week: 0, saves: 0, rising: 0 });
   assert.equal(snapshot.coverage.keywords.length, 55);
 });
 
@@ -213,11 +213,11 @@ test('later rounds that day keep showing the 06:00 today picks without recommend
 test('a 06:00 pick that also crosses the week threshold keeps both boards for the rest of the day', async () => {
   const store = new MemoryStore(); const log = []; const hot = { ...TODAY, likes: 12000 };
   const sweep = await runTick(deps(store, at('2026-09-13T06:02:00+08:00'), log, { notes: [hot] }));
-  assert.deepEqual((await readSnapshot(store, sweep.snapshotId)).boards, { today: 1, week: 1, dark: 0 });
+  assert.deepEqual((await readSnapshot(store, sweep.snapshotId)).boards, { today: 1, week: 1, saves: 0, rising: 0 });
   const morning = await runTick(deps(store, at('2026-09-13T09:02:00+08:00'), log, { notes: [hot] }));
   const snapshot = await readSnapshot(store, morning.snapshotId);
   assert.deepEqual(snapshot.notes.map(n => n.boards), [['today', 'week']]);
-  assert.deepEqual(snapshot.boards, { today: 1, week: 1, dark: 0 });
+  assert.deepEqual(snapshot.boards, { today: 1, week: 1, saves: 0, rising: 0 });
 });
 
 test('a sweep with successful empty searches and one rejected query publishes explicit partial zero results', async () => {

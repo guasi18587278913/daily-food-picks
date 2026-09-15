@@ -35,6 +35,6 @@ test('fresh author profile is reused and non-selected candidates never spend req
 test('missing share information stays missing and a failed lookup does not erase the old profile',async()=>{
  const store=new MemoryStore();await store.put('dfp_results','author_profile_'+id,{...record,capturedAt:now-86400001});
  const args={store,lease:{},provider:{request:async()=>({fans:100})},clock:()=>now,note:{authorId:id,boards:['week']}};
- assert.deepEqual(await ensureAuthorProfile(args),{status:'missing'});assert.deepEqual((await store.get('dfp_results','author_profile_'+id)).navigation,nav);
+ assert.deepEqual(await ensureAuthorProfile(args),{status:'missing',fans:100});assert.deepEqual((await store.get('dfp_results','author_profile_'+id)).navigation,nav);
  await assert.rejects(ensureAuthorProfile({...args,provider:{request:async()=>{throw Object.assign(Error('limit'),{code:'ROUND_BUDGET'});}}}),/limit/);
 });

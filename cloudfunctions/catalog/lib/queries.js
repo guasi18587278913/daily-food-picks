@@ -109,7 +109,9 @@ function createCatalog({ store, config, sign = async () => [], clock = Date.now 
         if (notes.length !== snapshot.count || offset > notes.length) fail('BACKEND_UNAVAILABLE');
         data = { snapshotId: snapshot.id, scheduledAt: snapshot.scheduledAt, finishedAt: snapshot.finishedAt,
           status: snapshot.status, partialReason: snapshot.partialReason, coverage: snapshot.coverage,
-          count: snapshot.count, boards: snapshot.boards, notes: await decorate(notes.slice(offset, offset + limit)),
+          count: snapshot.count, boards: { today: 0, week: 0, saves: 0, rising: 0, ...snapshot.boards },
+          accounts: offset === 0 && Array.isArray(snapshot.accounts) ? snapshot.accounts : [],
+          notes: await decorate(notes.slice(offset, offset + limit)),
           nextCursor: offset + limit < notes.length ? encode(query, offset + limit) : null };
       } else if (event.action === 'getContent') {
         if (typeof event.noteId !== 'string' || !NOTE_ID.test(event.noteId)) fail('INVALID_ARGUMENT');

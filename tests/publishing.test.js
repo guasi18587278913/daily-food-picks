@@ -108,3 +108,22 @@ test('cover failures retain safe diagnostics and a cache outage cannot discard a
  const saved=await storeCover({store:broken,note,fetcher:async()=>new Response(bytes,{headers:{'content-type':'image/jpeg'}}),upload:async()=>({fileID:'cloud://saved-cover'}),report:x=>issues.push(x)});
  assert.equal(saved,'cloud://saved-cover');assert.ok(issues.some(x=>x.code==='COVER_CACHE_READ_FAILED'));assert.ok(issues.some(x=>x.code==='COVER_CACHE_WRITE_FAILED'));
 });
+
+test('rising accounts are published as facts, deduplicated, and marked so seven days pass before a repeat', async () => {
+  const { publicAccount } = require('../cloudfunctions/collectTick/lib/publisher');
+  const { store, lease, round } = await setup();
+  const account = { authorId: '7'.repeat(24), author: '涨粉号', fans: 5300, fansBefore: 4000, fansDelta: 1300,
+    observedAt: '2026-09-15T04:00:00.000Z', baselineAt: '2026-09-12T04:00:00.000Z', spanHours: 72,
+    notes: [{ noteId: '8'.repeat(24), title: '蒸蛋', likes: 800, collected: 1200, publishedAt: '2026-09-14T02:00:00.000Z' }] };
+  const snapshot = await publish({ store, lease, round, now: NOW, notes: [note], accounts: [account, { ...account, author: '重复' }, { authorId: 'bad', fansDelta: 5 }],
+    status: 'complete', coverage: {}, successfulSearches: 1 });
+  assert.equal(snapshot.boards.rising, 1);
+  assert.deepEqual(snapshot.accounts.map(a => [a.authorId, a.author, a.fansDelta]), [[account.authorId, '涨粉号', 1300]]);
+  assert.equal(snapshot.accounts[0].notes.length, 1);
+  assert.equal((await store.get('dfp_results', `rising_published_${account.authorId}`)).snapshotId, snapshot.id);
+  // Only the listed facts travel to the page: no follower history, judgments or internal keys.
+  assert.deepEqual(Object.keys(snapshot.accounts[0]).sort(),
+    ['author', 'authorId', 'baselineAt', 'fans', 'fansBefore', 'fansDelta', 'notes', 'observedAt', 'spanHours']);
+  assert.equal(publicAccount({ authorId: '7'.repeat(24) }), null);
+  assert.equal(publicAccount({ authorId: 'short', fansDelta: 1 }), null);
+});

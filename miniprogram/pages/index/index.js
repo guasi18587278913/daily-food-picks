@@ -15,7 +15,7 @@ Page({
     favoriteNotice: '收藏仅保存在本机',
     newAvailable: false, total: 0, favoriteCount: 0, nextCursor: /** @type {string|null} */ (null),
     rounds: /** @type {RoundItem[]} */ ([]), roundIndex: 0, olderRounds: false,
-    sorts: /** @type {Record<string,string>} */ ({}), boardViews: boards([], {}, () => false),
+    sorts: /** @type {Record<string,string>} */ ({}), boardViews: boards([], {}, () => false, []),
     favoriteCards: /** @type {ReturnType<typeof card>[]} */ ([]), missingFavorites: /** @type {string[]} */ ([])
   },
   _api: createApi(options => wx.cloud.callFunction(options)),
@@ -23,6 +23,7 @@ Page({
   _favorites: /** @type {ReturnType<typeof createFavorites>|null} */ (null),
   _poller: /** @type {ReturnType<typeof createPoller>|null} */ (null),
   _notes: /** @type {FoodNote[]} */ ([]),
+  _accounts: /** @type {RisingAccount[]} */ ([]),
   _currentRoundId: /** @type {string|null} */ (null),
   _latestId: /** @type {string|null} */ (null),
   _newestId: /** @type {string|null} */ (null),
@@ -161,7 +162,9 @@ Page({
   },
   renderNotes() {
     const has = (/** @type {string} */ id) => this._favorites?.has(id) || false;
-    this.setData({ total: this._notes.length, boardViews: boards(this._notes, this.data.sorts, has),
+    // Accounts belong to the round being shown; searches and favourites are note lists, so the board stays empty there.
+    const accounts = this.data.mode === 'round' || this.data.mode === 'history' ? this._accounts : [];
+    this.setData({ total: this._notes.length, boardViews: boards(this._notes, this.data.sorts, has, accounts),
       favoriteCards: this.data.mode === 'favorites' ? this._notes.map(note => card(note, note.boards?.[0] || 'week', 'likes', has(note.noteId))) : [],
       favoriteCount: this._favorites?.ids().length || 0 });
   },
@@ -195,6 +198,7 @@ Page({
       const result = /** @type {RoundData} */ (await this._api('getRound', { snapshotId, limit: 50, cursor: append ? this.data.nextCursor : null }));
       if (request !== this._requestId) return false;
       this._notes = append ? [...this._notes, ...result.notes] : result.notes;
+      if (!append) this._accounts = Array.isArray(result.accounts) ? result.accounts : [];
       this._currentRoundId = snapshotId;
       this.setData({ mode, loading: false, loadingMore: false, partialReason: result.partialReason || '',
         roundLabel: `${formatTime(result.scheduledAt, true)} 选题`, updatedLabel: `整理于 ${formatTime(result.finishedAt, true)}`,
@@ -258,7 +262,7 @@ Page({
   /** @param {{currentTarget:{dataset:Record<string,string>}}} event */
   onSort(event) {
     const { board, sort } = event.currentTarget.dataset;
-    if (!['today', 'week', 'dark'].includes(board) || !['ratio', 'fanRatio', 'likes', 'collected', 'comments'].includes(sort)) return;
+    if (!['today', 'week', 'saves'].includes(board) || !['ratio', 'fanRatio', 'collectRatio', 'likes', 'collected', 'comments'].includes(sort)) return;
     this.setData({ sorts: { ...this.data.sorts, [board]: sort } }); this.renderNotes();
   },
   async onFavorites() { await this.loadFavorites(); },

@@ -90,9 +90,22 @@
     <block wx:elif="{{total}}">
       <block wx:for="{{boardViews}}" wx:key="key" wx:for-item="board">
         <view wx:if="{{board.count}}" class="board">
-          <view class="board-heading"><view class="board-mark {{board.key}}"></view><text class="board-name">{{board.name}}</text><text class="board-count">{{board.count}} 篇</text></view>
+          <view class="board-heading"><view class="board-mark {{board.key}}"></view><text class="board-name">{{board.name}}</text><text class="board-count">{{board.count}} {{board.key === 'rising' ? '个' : '篇'}}</text></view>
           <text class="board-rule">{{board.subtitle}}</text>
-          <view class="sort-row"><button wx:for="{{board.options}}" wx:key="value" wx:for-item="option" class="sort-option" data-board="{{board.key}}" data-sort="{{option.value}}" bindtap="onSort"><text class="sort-pill {{option.active ? 'active' : ''}}">{{option.label}}</text></button></view>
+          <view wx:if="{{board.options.length}}" class="sort-row"><button wx:for="{{board.options}}" wx:key="value" wx:for-item="option" class="sort-option" data-board="{{board.key}}" data-sort="{{option.value}}" bindtap="onSort"><text class="sort-pill {{option.active ? 'active' : ''}}">{{option.label}}</text></button></view>
+          <view wx:for="{{board.accounts}}" wx:key="authorId" wx:for-item="account" class="account-card">
+            <view class="account-head">
+              <text class="account-name">{{account.displayName}}</text>
+              <view class="account-delta"><text class="account-delta-number">{{account.deltaLabel}}</text><text class="account-delta-unit">粉丝</text></view>
+            </view>
+            <text class="account-meta">{{account.fansLabel}} · {{account.spanLabel}} · {{account.observedLabel}}</text>
+            <view wx:if="{{account.notes.length}}" class="account-notes">
+              <view wx:for="{{account.notes}}" wx:key="noteId" wx:for-item="work" class="account-note" data-id="{{work.noteId}}" bindtap="onViewContent">
+                <text class="account-note-title">{{work.title}}</text><text class="account-note-metric">{{work.metric}}</text>
+              </view>
+            </view>
+            <text wx:else class="account-notes-empty">这轮没有采集到这个账号的作品</text>
+          </view>
           <block wx:for="{{board.cards}}" wx:key="noteId"><template is="noteCard" data="{{note:item}}" /></block>
         </view>
         <view wx:else class="board-collapsed"><view class="board-mark {{board.key}}"></view><text class="board-name">{{board.name}}</text><text class="collapsed-rule">{{board.subtitle}}</text><text class="board-none">{{mode === 'search' ? '没有匹配' : '本轮暂无'}}</text></view>

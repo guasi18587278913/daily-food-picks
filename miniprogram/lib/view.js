@@ -20,30 +20,50 @@ function sortNotes(notes, key) {
     return bv - av || a.noteId.localeCompare(b.noteId);
   });
 }
+// The four boards the user defined on 2026-09-15. Rising lists accounts, not notes, so it carries no sort options.
 const BOARD_INFO = {
-  today: { name: '今日新锐', subtitle: '每日 06:00 筛选近 24 小时 · 至少 1,000 赞', sort: 'ratio', options: [['ratio', '倍数'], ['likes', '点赞'], ['collected', '收藏'], ['comments', '评论']] },
+  today: { name: '今日热榜', subtitle: '近 24 小时 · 至少 1,000 赞', sort: 'ratio', options: [['ratio', '倍数'], ['likes', '点赞'], ['collected', '收藏'], ['comments', '评论']] },
   week: { name: '本周热门', subtitle: '近 7 天 · 至少 1 万赞', sort: 'likes', options: [['likes', '点赞'], ['collected', '收藏'], ['comments', '评论']] },
-  dark: { name: '低粉黑马', subtitle: '近 5 天 · 至少 300 赞 · 粉丝不超过 5,000', sort: 'likes', options: [['likes', '点赞'], ['fanRatio', '赞粉比'], ['collected', '收藏'], ['comments', '评论']] }
+  rising: { name: '黑马榜单', subtitle: '近 7 天涨粉 1,000 以上的账号', sort: 'likes', options: [] },
+  saves: { name: '收藏榜单', subtitle: '近 7 天 · 收藏多于点赞', sort: 'collected', options: [['collected', '收藏'], ['collectRatio', '藏赞比'], ['likes', '点赞']] }
 };
 /** @param {FoodNote} note @param {string} board @param {string} sort @param {boolean} favorite */
 function card(note, board, sort, favorite) {
-  const big = sort === 'ratio' ? note.ratio : sort === 'fanRatio' ? note.fanRatio : sort === 'collected' ? note.collected : sort === 'comments' ? note.comments : note.likes;
-  const unit = sort === 'ratio' || sort === 'fanRatio' ? '倍' : sort === 'collected' ? '收藏' : sort === 'comments' ? '评论' : '赞';
+  const big = sort === 'ratio' ? note.ratio : sort === 'fanRatio' ? note.fanRatio : sort === 'collectRatio' ? note.collectRatio
+    : sort === 'collected' ? note.collected : sort === 'comments' ? note.comments : note.likes;
+  const unit = sort === 'ratio' || sort === 'fanRatio' || sort === 'collectRatio' ? '倍' : sort === 'collected' ? '收藏' : sort === 'comments' ? '评论' : '赞';
   const comparison = board === 'today' ? (note.baseline !== null && note.baseline > 0 ? `作者前 7 篇中位数 ${formatMetric(note.baseline)} 赞` : '作者参照不足，暂不计算倍数')
-    : board === 'dark' ? `采集时 ${formatMetric(note.fans)} 粉丝` : `${formatMetric(note.collected)} 收藏 · ${formatMetric(note.comments)} 评论`;
+    : board === 'saves' ? `${formatMetric(note.likes)} 赞 · 收藏是点赞的 ${formatMetric(note.collectRatio)} 倍`
+    : `${formatMetric(note.collected)} 收藏 · ${formatMetric(note.comments)} 评论`;
   const canOpenSource = canOpenOriginal(note);
   return { ...note, canOpenSource, sourceActionLabel: '查看内容',
     displayTitle: note.title || '未提供标题 · 点开查看内容', big: formatMetric(big), unit, comparison,
     publishedLabel: formatTime(note.publishedAt), typeLabel: note.type === 'video' ? '视频' : '图文', favorite };
 }
-/** @param {FoodNote[]} notes @param {Record<string,string>} sorts @param {(id:string)=>boolean} hasFavorite */
-function boards(notes, sorts, hasFavorite) {
-  return /** @type {BoardKey[]} */ (['today', 'week', 'dark']).map(key => {
+/** @param {RisingAccount} account */
+function accountCard(account) {
+  const hours = typeof account.spanHours === 'number' && Number.isFinite(account.spanHours) ? account.spanHours : null;
+  const span = hours === null ? '观测跨度未知' : hours >= 48 ? `${Math.round(hours / 24)} 天内` : `${hours} 小时内`;
+  return { authorId: account.authorId, displayName: account.author || '作者未提供',
+    deltaLabel: `+${formatMetric(account.fansDelta)}`, spanLabel: span,
+    fansLabel: `${formatMetric(account.fansBefore)} → ${formatMetric(account.fans)} 粉丝`,
+    observedLabel: `采集于 ${formatTime(account.observedAt, true)}`,
+    notes: (account.notes || []).map(x => ({ noteId: x.noteId, title: x.title || '未提供标题',
+      metric: `${formatMetric(x.likes)} 赞 · ${formatMetric(x.collected)} 收藏` })) };
+}
+/** @param {FoodNote[]} notes @param {Record<string,string>} sorts @param {(id:string)=>boolean} hasFavorite @param {RisingAccount[]} [accounts] */
+function boards(notes, sorts, hasFavorite, accounts = []) {
+  return /** @type {BoardKey[]} */ (['today', 'week', 'rising', 'saves']).map(key => {
     const info = BOARD_INFO[key]; const sort = sorts[key] || info.sort;
+    if (key === 'rising') {
+      const rows = accounts.filter(x => x && typeof x.authorId === 'string');
+      return { key, name: info.name, subtitle: info.subtitle, count: rows.length, options: [], cards: [],
+        accounts: [...rows].sort((a, b) => b.fansDelta - a.fansDelta || a.authorId.localeCompare(b.authorId)).map(accountCard) };
+    }
     const rows = notes.filter(x => x.boards?.includes(key));
-    return { key, name: info.name, subtitle: info.subtitle, count: rows.length,
+    return { key, name: info.name, subtitle: info.subtitle, count: rows.length, accounts: [],
       options: info.options.map(([value, label]) => ({ value, label, active: value === sort })),
       cards: sortNotes(rows, sort).map(x => card(x, key, sort, hasFavorite(x.noteId))) };
   });
 }
-module.exports = { formatMetric, formatTime, sortNotes, boards, card };
+module.exports = { formatMetric, formatTime, sortNotes, boards, card, accountCard, BOARD_INFO };

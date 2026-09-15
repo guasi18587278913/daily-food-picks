@@ -5,12 +5,15 @@ function inWindow(note, end, days) {
   const at = Date.parse(note.publishedAt);
   return Number.isFinite(at) && at >= end - days * 86400000 && at < end;
 }
-function eligibleBoards(note, end, { allowUnknownFans = false } = {}) {
+// Boards decided by the user on 2026-09-15: today (24 h, 1,000 likes), week (7 d, 10,000 likes) and saves (7 d, at least
+// 300 likes, more saves than likes). Rising accounts are decided from follower history in authors.js, not per note.
+const BOARDS = Object.freeze(['today', 'week', 'saves', 'rising']);
+function eligibleBoards(note, end) {
   if (!['video', 'normal'].includes(note.type) || !metric(note.likes)) return [];
   const boards = [];
   if (inWindow(note, end, 1) && note.likes >= 1000) boards.push('today');
   if (inWindow(note, end, 7) && note.likes >= 10000) boards.push('week');
-  if (inWindow(note, end, 5) && note.likes >= 300 && ((metric(note.fans) && note.fans <= 5000) || (allowUnknownFans && note.fans === null))) boards.push('dark');
+  if (inWindow(note, end, 7) && note.likes >= 300 && metric(note.collected) && note.collected > note.likes) boards.push('saves');
   return boards;
 }
 function historyBaseline(candidate, rawRows) {
@@ -30,4 +33,4 @@ function historyBaseline(candidate, rawRows) {
     history: prior.map(x => ({ noteId: x.noteId, likes: x.likes })), baselineReason: baseline ? null : 'zero_baseline' };
 }
 
-module.exports = { inWindow, eligibleBoards, historyBaseline };
+module.exports = { BOARDS, inWindow, eligibleBoards, historyBaseline };

@@ -1,5 +1,6 @@
 'use strict';
 const { ensureAuthorProfile } = require('./author-profiles');
+const { recordFansObservation, selectRecheck, risingAccounts } = require('./authors');
 
 const { randomUUID } = require('node:crypto');
 const { claimLease, releaseLease, assertLease, validatePrice } = require('./budget');
@@ -28,7 +29,7 @@ function searches(round) {
 }
 // The 06:00 sweep only admits today candidates; week and dark candidates keep coming from the regular rounds.
 function admitsCandidate(round, note) {
-  const boards = eligibleBoards(note, round.scheduledAt, { allowUnknownFans: true });
+  const boards = eligibleBoards(note, round.scheduledAt);
   return round.kind === 'sweep' ? boards.includes('today') : boards.length > 0;
 }
 // The saved-to-liked ratio on a search page is free evidence: in the audited 2026-09-14/15 rounds cooking notes had a
@@ -57,15 +58,15 @@ function prioritizeRecipeClues(rows) {
 function prioritizeCandidates(rows, round) {
   const ordered = prioritizeRecipeClues(rows);
   if (round?.kind !== 'regular' || !Number.isFinite(round.scheduledAt)) return ordered;
-  const queues = { week: [], dark: [], today: [], other: [] };
+  const queues = { week: [], saves: [], today: [], other: [] };
   for (const row of ordered) {
-    const boards = eligibleBoards(row.note, round.scheduledAt, { allowUnknownFans: true });
-    const group = boards.includes('week') ? 'week' : boards.includes('today') ? 'today' : boards.includes('dark') ? 'dark' : 'other';
+    const boards = eligibleBoards(row.note, round.scheduledAt);
+    const group = boards.includes('week') ? 'week' : boards.includes('today') ? 'today' : boards.includes('saves') ? 'saves' : 'other';
     queues[group].push(row);
   }
   const result = [];
-  while (queues.week.length || queues.dark.length || queues.today.length) {
-    for (const group of ['week', 'dark', 'today']) if (queues[group].length) result.push(queues[group].shift());
+  while (queues.week.length || queues.saves.length || queues.today.length) {
+    for (const group of ['week', 'saves', 'today']) if (queues[group].length) result.push(queues[group].shift());
   }
   return [...result, ...queues.other];
 }
@@ -96,8 +97,8 @@ const REASONS = {
   CANDIDATE_CAP: '本轮候选较多，按限定范围完成了一部分。', REQUEST_FAILED: '部分数据请求失败，保留已完成的选题。',
   AI_CALL_CAP: '本轮内容判断次数已达上限，保留已完成的选题。',
   SUPPLEMENT_BUDGET: '已为后续正式轮次保留额度，临时补跑结束。',
-  SWEEP_UNAVAILABLE: '今天 06:00 的今日新锐没有更新成功，本轮只展示新找到的选题。',
-  CARRY_UNAVAILABLE: '今天 06:00 的今日新锐读取失败，本轮只展示新找到的选题。',
+  SWEEP_UNAVAILABLE: '今天 06:00 的今日热榜没有更新成功，本轮只展示新找到的选题。',
+  CARRY_UNAVAILABLE: '今天 06:00 的今日热榜读取失败，本轮只展示新找到的选题。',
   CACHE_UNAVAILABLE: '部分复用数据不可用，已保留完成的检查结果。',
   VISION_UNAVAILABLE: '视频画面复核暂不可用，部分视频尚未确认。',
   VISION_OUTPUT_INVALID: '部分视频的判断结果缺少有效证据，尚未确认。',
@@ -130,6 +131,8 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
   const rows = await candidateRows(store, round.id);
   await finalizeStatistics({ store, lease, round, progress, rows, now: clock() });
   const notes = rows.filter(x => x.stage === 'done' && x.note.boards?.length).map(x => x.note);
+  // Rising accounts come from follower history, not from this round's candidates; the sweep publishes today picks only.
+  const accounts = round.kind === 'regular' ? await risingAccounts(store, clock()) : [];
   // Reaching the window end is not a coverage gap when every search and candidate had already finished.
   const workFinished = Array.isArray(progress.candidateIds) && (progress.candidateIndex || 0) >= progress.candidateIds.length;
   const reasonGaps = !reason || (reason === 'WINDOW_ENDED' && workFinished) ? [] : [reason];
@@ -150,6 +153,7 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
     coverage.textRequests = { judgments: progress.aiCalls || 0, retries: progress.aiRetries || 0 };
     coverage.vision = { checked: progress.visionChecked || 0, cacheHits: progress.visionCacheHits || 0 };
   }
+  if (round.kind === 'regular') coverage.rising = { rechecked: progress.rechecked || 0, queued: progress.recheckQueue?.length || 0, published: accounts.length };
   // A rejected query does not erase completed searches. Total provider failure or an unavailable
   // classifier still retains the old snapshot; partial discovery can publish an honest zero result.
   const judgmentFailures = ['MODEL_UNAVAILABLE', 'VISION_UNAVAILABLE', 'VISION_OUTPUT_INVALID', 'VISION_OUTPUT_TRUNCATED'];
@@ -172,7 +176,7 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
   if (carryError === 'CARRY_READ_FAILED' && !reason && clock() < round.closesAt - 10000) return { roundId: round.id, status: 'running' };
   const carryGaps = !carryError ? [] : [['SWEEP_MISSING', 'SWEEP_NOT_PUBLISHED'].includes(carryError) ? 'SWEEP_UNAVAILABLE' : 'CARRY_UNAVAILABLE'];
   const publishedGaps = [...gaps, ...carryGaps];
-  const result = await publish({ store, lease, round, notes, carriedNotes: carried.notes, status: publishedGaps.length ? 'partial' : 'complete',
+  const result = await publish({ store, lease, round, notes, carriedNotes: carried.notes, accounts, status: publishedGaps.length ? 'partial' : 'complete',
     coverage: { ...coverage, gaps: publishedGaps, carriedToday: carried.summary },
     partialReason: (!notes.length && publishedGaps.length ? '本轮已扫描，但未选出新作品。' : '') + describeGaps(publishedGaps),
     successfulSearches: progress.successfulSearches, clock });
@@ -264,6 +268,28 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
       }
       if (progress.candidateIndex >= progress.candidateIds.length) {
         if (discovery?.reopen()) { await saveProgress(store, lease, round.id, progress, clock); continue; }
+        // Regular rounds spend leftover room re-observing stale author follower counts for the rising board.
+        // Each re-check is one inspection request on the round's ledger; a budget refusal ends re-checks, never the round.
+        if (round.kind === 'regular' && !progress.recheckDone) {
+          if (!Array.isArray(progress.recheckQueue)) {
+            progress.recheckQueue = await selectRecheck(store, clock()); progress.recheckIndex = 0;
+            await saveProgress(store, lease, round.id, progress, clock);
+          }
+          if ((progress.recheckIndex || 0) < progress.recheckQueue.length && clock() < round.closesAt - 30000) {
+            const authorId = progress.recheckQueue[progress.recheckIndex];
+            try {
+              const result = await provider.request('user', { user_id: authorId }, { purpose: 'inspection', forceFresh: true });
+              await recordFansObservation(store, lease, { authorId, fans: result.fans, at: result.capturedAt ?? result.fetchedAt }, clock());
+              progress.rechecked = (progress.rechecked || 0) + 1;
+            } catch (e) {
+              if (['TICK_LIMIT', 'LEASE_EXPIRED', 'PROVIDER_AUTH'].includes(e.code)) throw e;
+              if (/BUDGET/.test(e.code || '')) progress.recheckDone = true;
+            }
+            progress.recheckIndex = (progress.recheckIndex || 0) + 1;
+            await saveProgress(store, lease, round.id, progress, clock); continue;
+          }
+          progress.recheckDone = true; await saveProgress(store, lease, round.id, progress, clock);
+        }
         return await conclude({ store, lease, round, progress, clock });
       }
       const noteId = progress.candidateIds[progress.candidateIndex];
@@ -404,14 +430,10 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           }
           row.stage = 'fans'; await save();
         } else if (row.stage === 'fans') {
-          const primaryBoard = eligibleBoards(row.note, round.scheduledAt).some(board => board === 'today' || board === 'week');
-          if (!primaryBoard && inWindow(row.note, round.scheduledAt, 5) && row.note.fans === null) {
-            const result = await provider.request('user', { user_id: row.note.authorId }, { purpose: 'inspection' });
-            row.note.fans = result.fans;
-          }
+          // No board needs a follower cap any more; the optional author lookup at the cover stage supplies fans and history.
           row.note.boards = eligibleBoards(row.note, round.scheduledAt);
-          if (row.note.boards.includes('today') || row.note.boards.includes('week')) row.note.boards = row.note.boards.filter(x => x !== 'dark');
           row.note.fanRatio = Number.isSafeInteger(row.note.fans) && row.note.fans > 0 ? Math.round(row.note.likes / row.note.fans * 10) / 10 : null;
+          row.note.collectRatio = Number.isSafeInteger(row.note.collected) && row.note.likes > 0 ? Math.round(row.note.collected / row.note.likes * 100) / 100 : null;
           row.stage = 'cover'; await save();
         } else if (row.stage === 'cover') {
           // Optional enrichment must not prevent a verified work from reaching publication.
@@ -420,6 +442,10 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
             try {
               const profile = await ensureAuthorProfile({ store, lease, provider, note: row.note, clock });
               row.authorProfileStatus = profile.status;
+              if (row.note.fans === null && Number.isSafeInteger(profile.fans)) {
+                row.note.fans = profile.fans;
+                row.note.fanRatio = profile.fans > 0 ? Math.round(row.note.likes / profile.fans * 10) / 10 : null;
+              }
             } catch (profileError) {
               if (profileError.code === 'LEASE_EXPIRED') throw profileError;
               row.authorProfileStatus = 'unavailable';

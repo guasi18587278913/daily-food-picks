@@ -130,20 +130,6 @@ test('time or budget reserved for inspection ends discovery without marking a pr
  const y=await setup();Object.assign(y.round,{discoveryAllocation:'candidate-reserve-v1',closesAt:NOW+1200000});
  await y.discovery.step({request:async()=>{throw Object.assign(Error('reserved'),{code:'DISCOVERY_INSPECTION_RESERVE'});}});assert.equal(y.progress.discovery.stopReason,'inspection_reserve');assert.deepEqual(y.progress.gaps,[]);
 });
-test('known recent high followers remove only dark-only candidates without a paid author query',async()=>{
- const {cacheKey}=require('../cloudfunctions/collectTick/lib/reuse'),{digest}=require('../cloudfunctions/collectTick/lib/provider');
- const x=await setup();x.round.discoveryAllocation='candidate-reserve-v2';
- const key=cacheKey('result',`user:${digest({user_id:id(999)})}`);await x.store.put('dfp_results',key,{version:'discovery-provider-1',capturedAt:NOW-1000,expiresAt:NOW+3600000,value:{fans:600000,pages:[]}});
- await x.discovery.addNotes([note(1,{likes:500}),note(2,{likes:15000}),note(3,{likes:500,fans:1000})],{key:'source',type:'keyword'});
- assert.deepEqual([...x.discovery.ids],[id(2),id(3)]);assert.equal(x.progress.discovery.knownHighFanExcluded,1);assert.equal(x.progress.discovery.pendingCandidateCount,2);
-});
-test('expired or near-threshold stale follower cache never excludes unknown candidates',async()=>{
- const {cacheKey}=require('../cloudfunctions/collectTick/lib/reuse'),{digest}=require('../cloudfunctions/collectTick/lib/provider');
- for(const patch of [{fans:5500,age:3600001},{fans:600000,age:21600001},{fans:null,age:1000}]){
-  const x=await setup();x.round.discoveryAllocation='candidate-reserve-v2';await x.store.put('dfp_results',cacheKey('result',`user:${digest({user_id:id(999)})}`),{version:'discovery-provider-1',capturedAt:NOW-patch.age,expiresAt:NOW+100000,value:{fans:patch.fans,pages:[]}});
-  await x.discovery.addNotes([note(1,{likes:500})],{key:'source',type:'keyword'});assert.equal(x.discovery.ids.size,1);
- }
-});
 test('resolved candidates release inspection reserve and allow one refill per progress advance',async()=>{
  const x=await setup();Object.assign(x.round,{discoveryAllocation:'candidate-reserve-v2',closesAt:NOW+1200000,candidateTarget:20});
  await x.discovery.addNotes(Array.from({length:17},(_,i)=>note(i+1)),{key:'source',type:'keyword'});

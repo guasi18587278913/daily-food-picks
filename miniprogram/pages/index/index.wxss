@@ -36,7 +36,20 @@
 .board-heading{display:flex;align-items:center;gap:16rpx}
 .board-mark{flex:none;width:16rpx;height:16rpx;border-radius:6rpx;background:var(--accent)}
 .board-mark.week{background:var(--week)}
-.board-mark.dark{background:var(--dark)}
+.board-mark.rising{background:var(--dark)}
+.board-mark.saves{background:var(--accent-ink)}
+.account-card{margin-top:20rpx;padding:24rpx;border-radius:32rpx;background:var(--card);box-shadow:0 2rpx 4rpx rgba(40,30,20,.04),0 12rpx 32rpx rgba(40,30,20,.06)}
+.account-head{display:flex;align-items:baseline;gap:16rpx}
+.account-name{flex:1;font-size:32rpx;font-weight:700}
+.account-delta{display:flex;align-items:baseline;gap:6rpx}
+.account-delta-number{font-size:36rpx;font-weight:700;color:var(--dark)}
+.account-delta-unit{font-size:24rpx;color:var(--text-3)}
+.account-meta{display:block;margin-top:8rpx;font-size:24rpx;line-height:34rpx;color:var(--text-2)}
+.account-notes{margin-top:16rpx;border-top:1rpx solid var(--line-soft)}
+.account-note{display:flex;align-items:baseline;gap:16rpx;padding:14rpx 0 0}
+.account-note-title{flex:1;font-size:26rpx;color:var(--text)}
+.account-note-metric{flex:none;font-size:24rpx;color:var(--text-3)}
+.account-notes-empty{display:block;margin-top:14rpx;font-size:24rpx;color:var(--text-3)}
 .board-name{font-size:34rpx;font-weight:700}
 .board-count{margin-left:auto;font-size:26rpx;color:var(--text-3)}
 .board-rule{display:block;margin:4rpx 0 0 32rpx;font-size:24rpx;color:var(--text-3)}

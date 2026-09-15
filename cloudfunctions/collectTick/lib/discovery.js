@@ -4,7 +4,7 @@ const { endpoint } = require('./endpoints');
 const { eligibleBoards } = require('./ranking');
 const { previouslyPublished } = require('./publisher');
 const { assertLease } = require('./budget');
-const { cacheKey, readCache, maximumAge } = require('./reuse');
+const { recordFansObservation } = require('./authors');
 const POLICY = require('../config/discovery.json');
 const KEYWORDS = require('../config/keywords.json');
 // Content jobs return posts for the candidate pool; the rest return leads (signals) or an author profile.
@@ -30,7 +30,7 @@ function admitsSource(round, seed) {
   return !(seed.kind === 'search' && seed.params?.note_type === '普通笔记');
 }
 function admitsCandidate(round, note) {
-  const boards = eligibleBoards(note, round.scheduledAt, { allowUnknownFans: true });
+  const boards = eligibleBoards(note, round.scheduledAt);
   return round.kind === 'sweep' ? boards.includes('today') : boards.length > 0;
 }
 function source(kind, params, label, origin = kind, now = 0) {
@@ -145,6 +145,8 @@ class Discovery {
     return true;
   }
   async profile(authorId, value, label) {
+    try { await recordFansObservation(this.store, this.lease, { authorId, fans: value.fans, at: value.capturedAt ?? value.fetchedAt }, this.clock()); }
+    catch (e) { if (e.code === 'LEASE_EXPIRED') throw e; }
     if (value.collectionsPublic !== true) return;
     const seed = { ...source('faved', { user_id: authorId, cursor: '' }, label || '公开收藏', 'faved', this.clock()),
       publicValidatedAt: value.fetchedAt };
@@ -160,24 +162,8 @@ class Discovery {
     }
   }
   async addNotes(notes, origin, related = false) {
-    for (let note of notes) {
+    for (const note of notes) {
       if (!admitsCandidate(this.round, note) || await previouslyPublished(this.store, note.noteId)) continue;
-      if (this.round.discoveryAllocation === 'candidate-reserve-v2' && note.fans === null
-        && eligibleBoards(note, this.round.scheduledAt, { allowUnknownFans: true }).every(b => b === 'dark')) {
-        try {
-          const now = this.clock(), requestKey = `user:${digest({ user_id: note.authorId })}`;
-          const cached = await readCache(this.store, cacheKey('result', requestKey),
-            { now, maxAgeMs: 21600000, version: 'discovery-provider-1' });
-          if (cached && now - cached.capturedAt <= maximumAge('user', cached.value, now)
-            && Number.isSafeInteger(cached.value.fans) && cached.value.fans >= 0) {
-            note = { ...note, fans: cached.value.fans };
-            if (!admitsCandidate(this.round, note)) {
-              this.progress.discovery.knownHighFanExcluded = (this.progress.discovery.knownHighFanExcluded || 0) + 1;
-              continue;
-            }
-          }
-        } catch { /* A missing author cache is unknown, never a hidden paid lookup. */ }
-      }
       const id = `${this.round.id}_${note.noteId}`;
       const old = await this.store.get('dfp_candidates', id);
       if (!old && this.ids.size >= POLICY.maxCandidates) {

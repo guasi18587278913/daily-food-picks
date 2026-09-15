@@ -31,14 +31,19 @@ test('unknown pin status, zero median, incomplete chronology cannot produce a ra
   assert.equal(historyBaseline(candidate(), history().map(x => ({ ...x, likes: 0 }))).ratio, null);
   assert.equal(historyBaseline(candidate(), history().map(x => ({ ...x, publishedAt: null }))).ratio, null);
 });
-test('windows include the lower boundary, exclude the upper boundary, and use five days for dark', () => {
+test('windows include the lower boundary, exclude the upper boundary, and the saves board needs more saves than likes', () => {
   assert.deepEqual(eligibleBoards(candidate({ publishedAt: new Date(NOW).toISOString() }), NOW), []);
-  assert.deepEqual(eligibleBoards(candidate({ publishedAt: new Date(NOW - 5 * 86400000).toISOString() }), NOW), ['dark']);
-  assert.deepEqual(eligibleBoards(candidate({ publishedAt: new Date(NOW - 5 * 86400000 - 1).toISOString() }), NOW), []);
+  assert.deepEqual(eligibleBoards(candidate({ publishedAt: new Date(NOW - 7 * 86400000).toISOString(), likes: 300, collected: 400 }), NOW), ['saves']);
+  assert.deepEqual(eligibleBoards(candidate({ publishedAt: new Date(NOW - 7 * 86400000 - 1).toISOString(), likes: 300, collected: 400 }), NOW), []);
   assert.deepEqual(eligibleBoards(candidate({ likes: 10000, fans: 5001 }), NOW), ['today', 'week']);
+  assert.deepEqual(eligibleBoards(candidate({ likes: 10000, collected: 10001 }), NOW), ['today', 'week', 'saves']);
   assert.deepEqual(eligibleBoards(candidate({ likes: null, fans: null }), NOW), []);
-  assert.deepEqual(eligibleBoards(candidate({ likes: 299 }), NOW), []);
-  assert.deepEqual(eligibleBoards(candidate({ likes: 300 }), NOW), ['dark']);
+  assert.deepEqual(eligibleBoards(candidate({ likes: 299, collected: 500 }), NOW), []);
+  assert.deepEqual(eligibleBoards(candidate({ likes: 300, collected: 300 }), NOW), []);
+  assert.deepEqual(eligibleBoards(candidate({ likes: 300, collected: 301 }), NOW), ['saves']);
+  assert.deepEqual(eligibleBoards(candidate({ likes: 300, collected: null }), NOW), []);
+  // Follower counts no longer gate any board.
+  assert.deepEqual(eligibleBoards(candidate({ likes: 300, collected: 301, fans: 900000 }), NOW), ['saves']);
 });
 test('the recorded Rednote image CDN is supported without accepting arbitrary image hosts', () => {
   assert.equal(imageUrl('https://sns-i11.rednotecdn.com/image.jpg'), 'https://sns-i11.rednotecdn.com/image.jpg');

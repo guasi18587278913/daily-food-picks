@@ -1,6 +1,7 @@
 'use strict';
 const { assertLease } = require('./budget');
 const { authorId, validAuthorNavigation, authorNavigationFor } = require('./author-navigation');
+const { recordFansObservation } = require('./authors');
 const REFRESH_MS = 86400000;
 function navigationFromShareLink(value, id) {
   if (!authorId(id) || typeof value !== 'string' || value.length > 4000) return null;
@@ -30,8 +31,12 @@ async function ensureAuthorProfile({ store, lease, provider, note, clock }) {
   const now = clock(), old = await store.get('dfp_results', `author_profile_${note.authorId}`);
   if (authorNavigationFor(old, note.authorId, now) && now - old.capturedAt < REFRESH_MS) return { status: 'cached' };
   const result = await provider.request('user', { user_id: note.authorId }, { purpose: 'inspection', requireAuthorProfile: true });
-  if (!validAuthorNavigation(result.authorNavigation, note.authorId)) return { status: 'missing' };
+  // The same answer feeds the follower history and the published fan count; the navigation link stays optional.
+  await recordFansObservation(store, lease, { authorId: note.authorId, author: note.author, fans: result.fans,
+    at: result.capturedAt ?? result.fetchedAt, note }, clock());
+  const fans = Number.isSafeInteger(result.fans) ? result.fans : null;
+  if (!validAuthorNavigation(result.authorNavigation, note.authorId)) return { status: 'missing', fans };
   await saveAuthorProfile(store, lease, result.authorNavigation, result.capturedAt || result.fetchedAt, clock());
-  return { status: 'saved' };
+  return { status: 'saved', fans };
 }
 module.exports = { navigationFromShareLink, saveAuthorProfile, ensureAuthorProfile };
