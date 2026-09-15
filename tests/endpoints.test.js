@@ -52,3 +52,15 @@ test('budget reads the discovery-only flag from the same table', async () => {
     }
   }
 });
+
+test('the square validator rejects malformed nesting instead of breaking on it', () => {
+  const good = { page_num: 1, page_size: 20, column: 'fans30GrowthRate', sort: 'desc',
+    blogger: { content_tag: ['美食'] }, flags: { exclude_fans_down: true } };
+  assert.equal(validateParams('pgy_bloggers', good), undefined);
+  // A validator whose job is to refuse bad input must refuse it by its own code, not break with a TypeError.
+  for (const bad of [{ ...good, blogger: null }, { ...good, flags: null }, { ...good, blogger: [] },
+    { ...good, flags: [] }, { ...good, blogger: { content_tag: ['美食'], region: 'cn' } },
+    { ...good, flags: { exclude_fans_down: false } }, { ...good, column: 'fansNum' }, { ...good, sort: 'asc' }]) {
+    assert.throws(() => validateParams('pgy_bloggers', bad), e => e.code === 'INVALID_PARAMETERS', JSON.stringify(bad));
+  }
+});

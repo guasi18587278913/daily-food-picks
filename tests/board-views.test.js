@@ -30,7 +30,7 @@ test('board rules on screen match the collector rules', () => {
   assert.deepEqual(BOARD_INFO.engage.options.map(o => o[0]), ['engageRatio', 'comments', 'shared', 'likes']);
 });
 
-test('accounts are ranked by follower gain and rendered as readable facts', () => {
+test('accounts are ranked by growth rate and rendered as readable facts', () => {
   const views = boards([], {}, () => false, [account(), account({ authorId: id(202), author: '更快的号', fansDelta: 4000, fans: 14000, fansBefore: 10000, gainRate: 0.4, spanHours: 20 })]);
   const rising = views[2];
   assert.deepEqual(rising.accounts.map(a => [a.displayName, a.deltaLabel, a.spanLabel]),
@@ -59,4 +59,20 @@ test('an empty round renders four collapsed boards without inventing accounts', 
   const views = boards([], {}, () => false);
   assert.equal(views.length, 4);
   assert.ok(views.every(v => v.count === 0 && v.cards.length === 0 && v.accounts.length === 0));
+});
+
+test('a large account that gained more followers still ranks below a small one that grew faster', () => {
+  // The page must not undo the collector's ranking: the board is about growth relative to the account's own size.
+  const big = account({ authorId: id(203), author: '大号', fans: 512000, fansBefore: 500000, fansDelta: 12000, gainRate: 0.024 });
+  const small = account({ authorId: id(204), author: '小号', fans: 7000, fansBefore: 5000, fansDelta: 2000, gainRate: 0.4 });
+  const rising = boards([], {}, () => false, [big, small])[2];
+  assert.deepEqual(rising.accounts.map(a => a.displayName), ['小号', '大号']);
+  // A row without a rate sorts last rather than throwing off the comparison.
+  assert.deepEqual(boards([], {}, () => false, [account({ authorId: id(205), author: '无速率', gainRate: null }), small])[2]
+    .accounts.map(a => a.displayName), ['小号', '无速率']);
+});
+
+test('a square account is labelled by the day its curve ends, not by a collection time it never had', () => {
+  assert.equal(accountCard(account({ source: 'pgy', observedAt: '2026-09-14T00:00:00.000Z' })).observedLabel, '数据截至 9月14日');
+  assert.equal(accountCard(account({ source: 'observed', observedAt: '2026-09-15T04:00:00.000Z' })).observedLabel, '采集于 9月15日 12:00');
 });

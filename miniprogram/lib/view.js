@@ -67,7 +67,9 @@ function accountCard(account) {
   return { authorId: account.authorId, displayName: account.author || '作者未提供', spikeLabel: spike,
     deltaLabel: `+${formatMetric(account.fansDelta)}${rate}`, spanLabel: span,
     fansLabel: `${formatMetric(account.fansBefore)} → ${formatMetric(account.fans)} 粉丝`,
-    observedLabel: `采集于 ${formatTime(account.observedAt, true)}`,
+    // The square's numbers are whole days published by the platform, so the honest label is where the curve ends;
+    // only our own observations happened at the moment we recorded them.
+    observedLabel: account.source === 'pgy' ? `数据截至 ${formatTime(account.observedAt)}` : `采集于 ${formatTime(account.observedAt, true)}`,
     notes: (account.notes || []).map(x => ({ noteId: x.noteId, title: x.title || '未提供标题',
       metric: `${formatMetric(x.likes)} 赞 · ${formatMetric(x.collected)} 收藏` })) };
 }
@@ -78,7 +80,10 @@ function boards(notes, sorts, hasFavorite, accounts = []) {
     if (key === 'rising') {
       const rows = accounts.filter(x => x && typeof x.authorId === 'string');
       return { key, name: info.name, subtitle: info.subtitle, count: rows.length, options: [], cards: [],
-        accounts: [...rows].sort((a, b) => b.fansDelta - a.fansDelta || a.authorId.localeCompare(b.authorId)).map(accountCard) };
+        // The board is about how fast an account grew relative to itself, so the rate leads here exactly as it does
+        // on the collector's side; sorting by the absolute gain would put every large account back on top.
+        accounts: [...rows].sort((a, b) => (b.gainRate ?? 0) - (a.gainRate ?? 0)
+          || b.fansDelta - a.fansDelta || a.authorId.localeCompare(b.authorId)).map(accountCard) };
     }
     const rows = notes.filter(x => x.boards?.includes(key));
     // Confirmed works lead; unconfirmed ones follow in the same order, so a board never hides them but never leads with them.

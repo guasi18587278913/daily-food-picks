@@ -153,9 +153,12 @@ function normalizeBlogger(raw) {
 function normalizeFansHistory(inner) {
   const rows = Array.isArray(inner.list) ? inner.list : null;
   if (!rows) throw error('PROVIDER_SCHEMA');
-  const points = rows.slice(0, 90).map(row => ({ date: text(row?.dateKey, 10), gain: Number.isSafeInteger(row?.num) ? row.num : null }))
-    .filter(p => /^\d{4}-\d{2}-\d{2}$/.test(p.date) && p.gain !== null)
-    .sort((a, b) => a.date.localeCompare(b.date));
+  const byDate = new Map();
+  for (const row of rows.slice(0, 90)) {
+    const date = text(row?.dateKey, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isSafeInteger(row?.num)) byDate.set(date, row.num);
+  }
+  const points = [...byDate.entries()].map(([date, gain]) => ({ date, gain })).sort((a, b) => a.date.localeCompare(b.date));
   if (rows.length && !points.length) throw error('PROVIDER_SCHEMA');
   return points;
 }

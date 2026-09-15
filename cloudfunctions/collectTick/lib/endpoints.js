@@ -23,6 +23,8 @@ const PGY_BASE = 'https://api.tikhub.io/api/v1/xiaohongshu/pgy/';
 const range = (value, min, max) => value === undefined || (Number.isInteger(value) && value >= min && value <= max);
 const names = (value, limit) => value === undefined
   || (Array.isArray(value) && value.length >= 1 && value.length <= limit && value.every(x => typeof x === 'string' && x.trim() !== '' && x.length <= 64));
+// A validator that throws on bad input rejects nothing: null and arrays have to fail the check, not break it.
+const plain = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const identifier = field => params => ID.test(params[field] || '');
 const optionalCursor = params => params.cursor === undefined || typeof params.cursor === 'string';
 const listRows = inner => inner.notes ?? inner.items ?? inner.list;
@@ -67,8 +69,8 @@ const ENDPOINTS = Object.freeze({
     params: ['page_num', 'page_size', 'column', 'sort', 'blogger', 'flags'],
     accepts: params => range(params.page_num, 1, 250) && range(params.page_size, 1, 20)
       && params.column === 'fans30GrowthRate' && params.sort === 'desc'
-      && (params.blogger === undefined || (Object.keys(params.blogger).every(k => k === 'content_tag') && names(params.blogger.content_tag, 8)))
-      && (params.flags === undefined || (Object.keys(params.flags).every(k => k === 'exclude_fans_down') && params.flags.exclude_fans_down === true)),
+      && (params.blogger === undefined || (plain(params.blogger) && Object.keys(params.blogger).every(k => k === 'content_tag') && names(params.blogger.content_tag, 8)))
+      && (params.flags === undefined || (plain(params.flags) && Object.keys(params.flags).every(k => k === 'exclude_fans_down') && params.flags.exclude_fans_down === true)),
     rows: inner => Array.isArray(inner.kols) ? inner.kols : null }),
   pgy_fans_history: Object.freeze({ base: PGY_BASE, method: 'POST', path: 'get_blogger_fans_history', yields: 'fans_history',
     params: ['user_id', 'increase_type', 'date_type'],

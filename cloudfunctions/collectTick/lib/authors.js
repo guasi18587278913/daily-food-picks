@@ -112,22 +112,33 @@ async function risingAccounts(store, now, limit = RULES.maxPerRound) {
 const dayKey = (now, back = 0) => new Date(now + 8 * 3600000 - back * DAY).toISOString().slice(0, 10);
 const dailyId = now => `rising_daily_${dayKey(now)}`;
 // A curve of daily gains becomes the seven-day figures: how many followers, at what rate, and which day carried it.
+// The platform only publishes complete days, so the newest point is yesterday and the week ends there; counting today
+// as well would silently make it a six-day window while the board still promised seven.
 function growthFromCurve(blogger, points, now) {
-  const window = (Array.isArray(points) ? points : []).filter(p => p.date >= dayKey(now, RULES.windowDays - 1) && p.date <= dayKey(now));
+  const from = dayKey(now, RULES.windowDays), to = dayKey(now, 1);
+  // One entry per day, oldest first: a repeated date must be counted once, and the caller's order is not trusted.
+  const byDate = new Map();
+  // A day without a usable number is dropped rather than summed: NaN would clear both bars instead of failing them.
+  for (const p of Array.isArray(points) ? points : []) {
+    if (p && Number.isSafeInteger(p.gain) && p.date >= from && p.date <= to) byDate.set(p.date, p.gain);
+  }
+  const window = [...byDate.entries()].map(([date, gain]) => ({ date, gain })).sort((a, b) => a.date.localeCompare(b.date));
   if (!window.length || !Number.isSafeInteger(blogger.fans) || blogger.fans <= 0) return null;
   const gain = window.reduce((sum, p) => sum + p.gain, 0);
   const before = blogger.fans - gain;
   if (before <= 0) return null;
   const spike = window.reduce((best, p) => !best || p.gain > best.gain ? p : best, null);
+  const first = window[0].date, last = window[window.length - 1].date;
   return { gain, rate: Math.round(gain / before * 1000) / 1000, fansBefore: before, fans: blogger.fans,
-    spanHours: window.length * 24, observedAt: window[window.length - 1].date, baselineAt: window[0].date,
+    // The span is the range the curve actually covers, so a curve missing days never claims a full week.
+    spanHours: Math.round((Date.parse(`${last}T00:00:00.000Z`) - Date.parse(`${first}T00:00:00.000Z`)) / HOUR) + 24,
+    observedAt: last, baselineAt: first,
     spikeDate: spike && spike.gain > 0 ? spike.date : null, spikeGain: spike && spike.gain > 0 ? spike.gain : null };
 }
 // Entries for the board: the same rule as the observed path, applied to the square's accounts.
 function risingFromCurves(bloggers, curves, now, limit = PGY.maxAccounts) {
   const accounts = [];
   for (const blogger of bloggers) {
-    if (accounts.length >= limit) break;
     const growth = growthFromCurve(blogger, curves.get(blogger.authorId), now);
     if (!growth || growth.gain < RULES.minimumGain || growth.rate < RULES.minimumRate) continue;
     accounts.push({ authorId: blogger.authorId, author: blogger.author || null, fans: growth.fans, fansBefore: growth.fansBefore,
@@ -135,16 +146,21 @@ function risingFromCurves(bloggers, curves, now, limit = PGY.maxAccounts) {
       observedAt: `${growth.observedAt}T00:00:00.000Z`, baselineAt: `${growth.baselineAt}T00:00:00.000Z`,
       spanHours: growth.spanHours, source: 'pgy', notes: [] });
   }
-  return accounts.sort((a, b) => b.gainRate - a.gainRate || b.fansDelta - a.fansDelta || a.authorId.localeCompare(b.authorId));
+  // Ranked before the cap, so the accounts that survive it are the fastest growing rather than the first listed.
+  return accounts.sort((a, b) => b.gainRate - a.gainRate || b.fansDelta - a.fansDelta || a.authorId.localeCompare(b.authorId))
+    .slice(0, limit);
 }
+// A day's board says whether it is finished. An empty board left behind by a failed square is not the day's answer:
+// it must not silence our own observations, and a later round has to be free to try again.
 async function readDailyRising(store, now) {
   const record = await store.get('dfp_results', dailyId(now));
-  return Array.isArray(record?.accounts) ? record.accounts : null;
+  return record && Array.isArray(record.accounts) ? { accounts: record.accounts, complete: record.complete === true } : null;
 }
 async function saveDailyRising(store, lease, accounts, meta, now) {
   return store.transaction(async tx => {
     await assertLease(tx, lease, now);
-    await tx.put('dfp_results', dailyId(now), { recordType: 'rising_daily', day: dayKey(now), accounts, ...meta, updatedAt: now });
+    await tx.put('dfp_results', dailyId(now), { recordType: 'rising_daily', day: dayKey(now), accounts, ...meta,
+      complete: meta?.complete === true, updatedAt: now });
   });
 }
 module.exports = { RULES, PGY, INDEX_ID, historyId, publishedId, dailyId, dayKey, prunePoints, gainWithin, qualifies, summarize,

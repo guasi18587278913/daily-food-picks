@@ -1,7 +1,7 @@
 'use strict';
 const { ensureAuthorProfile } = require('./author-profiles');
 const { recordFansObservation, markRecheckAttempt, selectRecheck, risingAccounts,
-  risingFromCurves, readDailyRising, saveDailyRising, PGY } = require('./authors');
+  risingFromCurves, readDailyRising, saveDailyRising, publishedRecently, PGY } = require('./authors');
 
 const { randomUUID } = require('node:crypto');
 const { claimLease, releaseLease, assertLease, validatePrice } = require('./budget');
@@ -87,8 +87,12 @@ function prioritizeCandidates(rows, round) {
 // seven-day figures the board publishes. Built once a day: later rounds read the stored result and spend nothing.
 async function buildDailyRising({ store, lease, provider, round, progress, clock }) {
   if (round.kind !== 'regular' || round.risingSource !== 'pgy' || progress.risingBuilt) return;
-  if (await readDailyRising(store, clock())) { progress.risingBuilt = true; return; }
+  // A finished board is the day's answer. One left empty by a failed square is not, so a later round retries it.
+  const existing = await readDailyRising(store, clock());
+  if (existing && (existing.complete || existing.accounts.length)) { progress.risingBuilt = true; return; }
   const budget = code => /BUDGET/.test(code || '');
+  // Losing the square is one board's problem, never the round's: the fallback still has our own observations.
+  const fatal = code => ['LEASE_EXPIRED', 'TICK_LIMIT'].includes(code);
   let bloggers = [];
   try {
     const result = await provider.request('pgy_bloggers', { page_num: 1, page_size: PGY.listSize,
@@ -96,13 +100,16 @@ async function buildDailyRising({ store, lease, provider, round, progress, clock
       { purpose: 'inspection' });
     bloggers = Array.isArray(result.bloggers) ? result.bloggers : [];
   } catch (e) {
-    if (['LEASE_EXPIRED', 'PROVIDER_AUTH', 'TICK_LIMIT'].includes(e.code)) throw e;
+    if (fatal(e.code)) throw e;
     progress.gaps.push(budget(e.code) ? 'RISING_BUDGET' : 'RISING_UNAVAILABLE');
     progress.risingBuilt = true; return;
   }
   const curves = new Map(); let stopped = null;
-  for (const blogger of bloggers.slice(0, PGY.maxCurves)) {
+  for (const blogger of bloggers) {
+    if (curves.size >= PGY.maxCurves) break;
     if (clock() >= round.closesAt - 30000) { stopped = 'RISING_INCOMPLETE'; break; }
+    // Checked before the curve is bought: a request spent on an account this board showed days ago buys nothing.
+    if (await publishedRecently(store, blogger.authorId, clock())) continue;
     try {
       const curve = await provider.request('pgy_fans_history', { user_id: blogger.authorId, increase_type: 2, date_type: 1 },
         { purpose: 'inspection' });
@@ -110,14 +117,16 @@ async function buildDailyRising({ store, lease, provider, round, progress, clock
     } catch (e) {
       // Running out of requests in this tick is not a failure: the next tick resumes and the curves already
       // fetched come back from the six-hour result cache without being charged again.
-      if (['LEASE_EXPIRED', 'PROVIDER_AUTH', 'TICK_LIMIT'].includes(e.code)) throw e;
-      stopped = budget(e.code) ? 'RISING_BUDGET' : 'RISING_INCOMPLETE';
-      if (budget(e.code)) break;
+      if (fatal(e.code)) throw e;
+      stopped = budget(e.code) ? 'RISING_BUDGET' : e.code === 'PROVIDER_AUTH' ? 'RISING_UNAVAILABLE' : 'RISING_INCOMPLETE';
+      if (budget(e.code) || e.code === 'PROVIDER_AUTH') break;
     }
   }
   if (stopped) progress.gaps.push(stopped);
   const accounts = risingFromCurves(bloggers, curves, clock());
-  await saveDailyRising(store, lease, accounts, { listed: bloggers.length, curves: curves.size, roundId: round.id }, clock());
+  // Recorded either way so this round can use what it got, but a board cut short stays open for a later round.
+  await saveDailyRising(store, lease, accounts,
+    { listed: bloggers.length, curves: curves.size, roundId: round.id, complete: !stopped }, clock());
   progress.risingBuilt = true;
 }
 async function saveProgress(store, lease, roundId, progress, clock) {
@@ -186,8 +195,9 @@ async function conclude({ store, lease, round, progress, reason, clock }) {
   const notes = rows.filter(x => x.stage === 'done' && x.note.boards?.length).map(x => x.note);
   // Rising accounts come from the blogger square built earlier today, or from our own follower observations when that
   // request did not succeed. Either way they are independent of this round's candidates; the sweep publishes none.
+  const daily = round.kind === 'regular' ? await readDailyRising(store, clock()) : null;
   const accounts = round.kind !== 'regular' ? []
-    : (await readDailyRising(store, clock())) || await risingAccounts(store, clock());
+    : daily?.accounts.length ? daily.accounts : await risingAccounts(store, clock());
   // Reaching the window end is not a coverage gap when every search and candidate had already finished.
   const workFinished = Array.isArray(progress.candidateIds) && (progress.candidateIndex || 0) >= progress.candidateIds.length;
   const reasonGaps = !reason || (reason === 'WINDOW_ENDED' && workFinished) ? [] : [reason];
@@ -333,7 +343,7 @@ async function runTick({ store, config, key, generate, upload, visionKey, review
           await saveProgress(store, lease, round.id, progress, clock); continue;
         }
         // Our own follower observations stay as the fallback source, re-checked only when the square gave us nothing.
-        if (round.kind === 'regular' && !progress.recheckDone && !(await readDailyRising(store, clock()))?.length) {
+        if (round.kind === 'regular' && !progress.recheckDone && !(await readDailyRising(store, clock()))?.accounts.length) {
           if (!Array.isArray(progress.recheckQueue)) {
             progress.recheckQueue = await selectRecheck(store, clock()); progress.recheckIndex = 0;
             await saveProgress(store, lease, round.id, progress, clock);
