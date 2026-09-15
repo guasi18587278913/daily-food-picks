@@ -1,6 +1,9 @@
 node_modules/
 node_modules
 miniprogram/lib/source-navigation.js
+miniprogram/lib/author-navigation.js
+cloudfunctions/catalog/lib/author-navigation.js
+cloudfunctions/collectTick/lib/author-navigation.js
 cloudfunctions/catalog/lib/source-navigation.js
 dist/
 coverage/

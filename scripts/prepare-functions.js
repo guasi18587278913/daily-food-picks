@@ -3,6 +3,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const copies = [
+  ['shared/author-navigation.js', 'miniprogram/lib/author-navigation.js'],
+  ['shared/author-navigation.js', 'cloudfunctions/catalog/lib/author-navigation.js'],
+  ['shared/author-navigation.js', 'cloudfunctions/collectTick/lib/author-navigation.js'],
   ['shared/source-navigation.js', 'miniprogram/lib/source-navigation.js'],
   ['shared/source-navigation.js', 'cloudfunctions/catalog/lib/source-navigation.js'],
   ['config/rules.json', 'cloudfunctions/collectTick/config/rules.json'],

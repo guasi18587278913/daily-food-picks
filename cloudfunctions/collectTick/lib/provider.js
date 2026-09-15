@@ -5,6 +5,7 @@ const { PRICE_URL, PRICE_MICRO_USD, reserveAttempt, markInflight, finishAttempt 
 const { error } = require('./config');
 const { cacheKey, readCache, writeCache, maximumAge, mergeDetail } = require('./reuse');
 const { ID, endpoint, detailKind } = require('./endpoints');
+const { navigationFromShareLink } = require('./author-profiles');
 const BASE = 'https://api.tikhub.io/api/v1/xiaohongshu/app_v2/';
 const metric = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
 const text = (value, max) => typeof value === 'string' ? value.slice(0, max) : '';
@@ -145,7 +146,8 @@ function parseResponse(kind, payload, now, params = {}) {
   if (!inner || typeof inner !== 'object') throw error('PROVIDER_SCHEMA');
   if (spec.yields === 'profile') {
     const visibility = inner.tab_public?.collection;
-    return { fans: metric(inner.fans), fetchedAt: now,
+    const authorNavigation = navigationFromShareLink(inner.share_link, params.user_id);
+    return { fans: metric(inner.fans), fetchedAt: now, ...(authorNavigation ? { authorNavigation } : {}),
       ...(typeof visibility === 'boolean' ? { collectionsPublic: visibility && inner.tab_visible?.collect !== false } : {}) };
   }
   if (spec.yields === 'signals') return { notes: [], signals: metadataSignals(spec, inner),
@@ -208,6 +210,7 @@ class Provider {
     const cached = await readCache(this.store, cacheKey('result', requestKey),
       { now: this.clock(), maxAgeMs: 6 * 3600000, version });
     if (!cached) return null;
+    if (kind === 'user' && options.requireAuthorProfile && !cached.value.authorNavigation) return null;
     if (!Array.isArray(cached.value.pages)) return null;
     let notes;
     try { notes = await this.notes(cached.value); } catch { return null; }
@@ -237,7 +240,8 @@ class Provider {
       const reused = await this.reusable(kind, requestKey, { ...options, noteId: params.note_id });
       if (reused) return reused;
     }
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    const maxAttempts = options.requireAuthorProfile ? 1 : 2;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       // The runner stops claiming work at 105 s, so ten serial requests (about 4 s each for searches) fit one tick.
       if (this.sent >= 10) throw error('TICK_LIMIT');
       const record = await reserveAttempt(this.store, { roundId: this.round.id, requestKey, kind, attempt,
@@ -261,7 +265,7 @@ class Provider {
         const url = new URL(endpoint(kind).path, BASE);
         Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)));
         const response = await this.fetcher(url, { headers: { Authorization: `Bearer ${this.key}` },
-          signal: AbortSignal.timeout(40000), redirect: 'error' });
+          signal: AbortSignal.timeout(options.requireAuthorProfile ? 10000 : 40000), redirect: 'error' });
         diagnostics.httpStatus = response.status;
         if (!response.ok) throw error(response.status === 401 || response.status === 403 ? 'PROVIDER_AUTH'
           : response.status === 429 || response.status >= 500 ? 'HTTP_RETRYABLE' : 'HTTP_REJECTED');
@@ -298,7 +302,7 @@ class Provider {
         if (e.code === 'LEASE_EXPIRED') throw e;
         const code = ['PROVIDER_AUTH', 'HTTP_RETRYABLE', 'HTTP_REJECTED', 'PROVIDER_REJECTED', 'PROVIDER_SCHEMA', 'RESPONSE_TOO_LARGE'].includes(e.code) ? e.code : 'NETWORK_ERROR';
         await finishAttempt(this.store, record.id, this.lease, { status: code === 'NETWORK_ERROR' ? 'unknown' : 'failed', errorCode: code, ...diagnostics }, this.clock());
-        if (code !== 'HTTP_RETRYABLE' || attempt === 2) throw error(code);
+        if (code !== 'HTTP_RETRYABLE' || attempt === maxAttempts) throw error(code);
       }
     }
     throw error('REQUEST_FAILED');

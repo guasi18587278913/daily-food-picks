@@ -18,3 +18,14 @@ test('legacy cloud covers retain their source fallback even if signing fails',as
  for(const successful of [false,true]){const api=createCatalog({store:x.store,config:{appId,migrationFallback:false},clock:()=>NOW,sign:async()=>{if(!successful)throw Error('signing down');return[{fileID:'cloud://old-cover',tempFileURL:'https://cloud.example/signed'}];}});
  const result=await api({action:'getNotes',noteIds:[id]},x.ctx);assert.equal(result.ok,true);assert.equal(result.data.notes[0].thumbUrl,successful?'https://cloud.example/signed':'https://sns-i11.rednotecdn.com/cover.jpg');assert.equal(result.data.notes[0].thumbFallbackUrl,'https://sns-i11.rednotecdn.com/cover.jpg');}
 });
+test('author navigation is bound to the published author, read-only, and failure does not hide content',async()=>{
+ const x=await setup(),key='author_profile_'+authorId;
+ const navigation={authorId,token:'opaque-share-value',source:'app_share'};
+ await x.store.put('dfp_results',key,{recordType:'author_navigation',authorId,capturedAt:NOW,navigation});
+ const before=structuredClone(x.store.docs);const r=await x.api({action:'getContent',noteId:id,authorId:'3'.repeat(24)},x.ctx);
+ assert.deepEqual(r.data.note.authorNavigation,navigation);assert.deepEqual(x.store.docs,before);
+ await x.store.put('dfp_results',key,{recordType:'author_navigation',authorId,capturedAt:NOW,navigation:{...navigation,authorId:'3'.repeat(24)}});
+ assert.equal((await x.api({action:'getContent',noteId:id},x.ctx)).data.note.authorNavigation,null);
+ const get=x.store.get.bind(x.store);x.store.get=async(c,k)=>{if(k===key)throw Error('cache offline');return get(c,k);};
+ const failed=await x.api({action:'getContent',noteId:id},x.ctx);assert.equal(failed.ok,true);assert.equal(failed.data.note.authorNavigation,null);assert.ok(failed.data.content.desc);
+});

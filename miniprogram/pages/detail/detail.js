@@ -2,13 +2,15 @@
 const { createApi } = require('../../lib/api');
 const { formatTime, formatMetric } = require('../../lib/view');
 const { canOpenOriginal, openOriginal } = require('../../lib/source');
+const { canOpenAuthor, openAuthor } = require('../../lib/author-source');
 Page({
   data: {
     loading: true, message: '', note: /** @type {FoodNote|null} */ (null),
     content: /** @type {NoteContent|null} */ (null),
     images: /** @type {{url:string,failed:boolean}[]} */ ([]),
     title: '', publishedLabel: '', capturedLabel: '', likesLabel: '', collectedLabel: '', commentsLabel: '',
-    canOpenOriginal: false, openingOriginal: false, videoFailed: false, videoHeight: 440
+    canOpenOriginal: false, openingOriginal: false, canOpenAuthor: false, openingAuthor: false,
+    videoFailed: false, videoHeight: 440
   },
   _api: createApi(options => wx.cloud.callFunction(options)),
   _noteId: '', _requestId: 0, _loadedOnce: false,
@@ -38,13 +40,13 @@ Page({
         images: content.images.map(url => ({ url, failed: false })), videoFailed: false, videoHeight: 440,
         publishedLabel: formatTime(note.publishedAt), capturedLabel: formatTime(content.capturedAt, true),
         likesLabel: formatMetric(note.likes), collectedLabel: formatMetric(note.collected), commentsLabel: formatMetric(note.comments),
-        canOpenOriginal: canOpenOriginal(note) });
+        canOpenOriginal: canOpenOriginal(note), canOpenAuthor: canOpenAuthor(note) });
     } catch (error) {
       if (requestId !== this._requestId) return;
       const code = /** @type {FoodError} */ (error)?.code || '';
       const messages = /** @type {Record<string,string>} */ ({ NETWORK_ERROR: '连接失败，请重试。',
         INVALID_RESPONSE: '服务暂时不可用，请重试。', NOT_FOUND: '这条选题的内容暂不可用，请返回列表。' });
-      this.setData({ note: null, content: null, images: [], canOpenOriginal: false,
+      this.setData({ note: null, content: null, images: [], canOpenOriginal: false, canOpenAuthor: false,
         message: messages[code] || (error instanceof Error ? error.message : '内容暂时无法读取，请稍后重试。') });
     } finally {
       if (requestId === this._requestId) { this._loadedOnce = true; this.setData({ loading: false }); }
@@ -74,6 +76,13 @@ Page({
     const note = this.data.note;
     if (!note) return;
     this.setData({ note: { ...note, thumbUrl: note.thumbFallbackUrl !== note.thumbUrl ? note.thumbFallbackUrl || null : null } });
+  },
+  async onOpenAuthor() {
+    if (this.data.loading || this.data.openingAuthor || !this.data.note || !canOpenAuthor(this.data.note)) return;
+    this.setData({ openingAuthor: true });
+    try { await openAuthor(this.data.note, options => wx.navigateToMiniProgram(options)); }
+    catch { wx.showToast({ title: '作者主页暂未打开，请稍后再试。', icon: 'none' }); }
+    finally { this.setData({ openingAuthor: false }); }
   },
   async onOpenOriginal() {
     if (this.data.openingOriginal || !this.data.note || !canOpenOriginal(this.data.note)) return;

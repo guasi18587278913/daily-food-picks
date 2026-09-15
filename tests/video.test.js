@@ -41,3 +41,6 @@ test('response size, actual duration and failed decoding stop without leaving te
   await assert.rejects(() => extractFrames(media, { tempRoot: root, fetcher: async () => new Response(movie), execFile: async () => { throw Object.assign(Error(), { killed: true }); } }), /VIDEO_PROCESS_TIMEOUT/);
   assert.deepEqual(await fs.readdir(root), []);
 }));
+test('download timeouts are reported as video failures, without invoking a model or decoder',async()=>sandbox(async root=>{
+ let processes=0;await assert.rejects(extractFrames(media,{tempRoot:root,fetcher:async()=>{throw new DOMException('sample timeout','TimeoutError');},execFile:async()=>{processes++;}}),/VIDEO_DOWNLOAD_TIMEOUT/);assert.equal(processes,0);assert.deepEqual(await fs.readdir(root),[]);
+}));

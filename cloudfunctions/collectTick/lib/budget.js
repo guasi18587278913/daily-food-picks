@@ -84,10 +84,17 @@ async function reserveAttempt(store, request) {
     if (!round || round.status !== 'running') fail('ROUND_NOT_RUNNING');
     const adaptive = round.definition?.discoveryMode === 'adaptive';
     const discoveryCalls = round.discoveryCalls || 0;
+    const dynamicDiscovery = adaptive && ['candidate-reserve-v1', 'candidate-reserve-v2'].includes(round.definition.discoveryAllocation);
     if (adaptive) {
-      const ceiling = round.definition.kind === 'sweep' ? 18 : round.definition.budgetTier === 'expanded250' ? 8 : 4;
-      if (!integer(round.definition.discoveryLimit, 1, ceiling) || !integer(discoveryCalls, 0, ceiling)) fail('INVALID_BUDGET');
-      if (purpose === 'discovery' && discoveryCalls + 1 > round.definition.discoveryLimit) fail('DISCOVERY_BUDGET');
+      if (dynamicDiscovery) {
+        if (round.definition.budgetTier !== 'expanded250' || limits.budgetTier !== 'expanded250'
+          || !integer(discoveryCalls, 0, 100)) fail('INVALID_BUDGET');
+      } else {
+        if (round.definition.discoveryAllocation !== undefined) fail('INVALID_BUDGET');
+        const ceiling = round.definition.kind === 'sweep' ? 18 : round.definition.budgetTier === 'expanded250' ? 8 : 4;
+        if (!integer(round.definition.discoveryLimit, 1, ceiling) || !integer(discoveryCalls, 0, ceiling)) fail('INVALID_BUDGET');
+        if (purpose === 'discovery' && discoveryCalls + 1 > round.definition.discoveryLimit) fail('DISCOVERY_BUDGET');
+      }
     }
     const daily = await tx.get('dfp_budgets', day) || { calls: 0, microUsd: 0 };
     const trial = validation ? (await tx.get('dfp_budgets', 'initial-validation') || { calls: 0, microUsd: 0 }) : null;
@@ -108,6 +115,19 @@ async function reserveAttempt(store, request) {
       : expanded && round.definition?.budgetTier === 'expanded250' ? 50 : 20;
     if ((round.calls || 0) + 1 > Math.min(limits.roundCalls, roundCeiling)) fail('ROUND_BUDGET');
     if (trial && (trial.calls + 1 > limits.validationCalls || trial.microUsd + price.microUsd > limits.validationMicroUsd)) fail('VALIDATION_BUDGET');
+    if (dynamicDiscovery && purpose === 'discovery') {
+      const candidates = round.definition.discoveryAllocation === 'candidate-reserve-v2'
+        ? round.progress?.discovery?.pendingCandidateCount : round.progress?.discovery?.candidateCount;
+      if (!integer(candidates, 0, 40)) fail('INVALID_BUDGET');
+      // A selected work may need detail, two history pages, and an author share lookup.
+      const inspectionReserve = Math.max(12, 4 * Math.min(candidates, 20));
+      const laterRounds = round.definition.supplement ? round.definition.reservedRegularCalls : 0;
+      if ((round.calls || 0) + 1 + inspectionReserve > Math.min(limits.roundCalls, roundCeiling)
+        || usedCalls + 1 + inspectionReserve + laterRounds > limits.dailyCalls
+        || usedMoney + (1 + inspectionReserve + laterRounds) * price.microUsd > limits.dailyMicroUsd
+        || trial && (trial.calls + 1 + inspectionReserve > limits.validationCalls
+          || trial.microUsd + (1 + inspectionReserve) * price.microUsd > limits.validationMicroUsd)) fail('DISCOVERY_INSPECTION_RESERVE');
+    }
     const record = {
       roundId, requestKey, kind, purpose, attempt, day, validation, owner: lease.owner, leaseEpoch: lease.epoch,
       status: 'reserved', microUsd: price.microUsd, reservedAt: now, finishedAt: null,

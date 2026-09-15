@@ -160,7 +160,12 @@ test('with the real provider the sweep resumes across ticks, sends at most ten r
   assert.equal((await store.get('dfp_rounds', '20260913-0600')).calls, 100);
   assert.deepEqual([(await store.get('dfp_budgets', '2026-09-13')).calls, (await store.list('dfp_attempts')).length], [100, 100]);
   const snapshot = await readSnapshot(store, result.snapshotId);
-  assert.equal(snapshot.count, 22);
+  // Since 5affd46 each selected work also spends one optional author-profile call, so 100 calls now cover
+  // 55 searches plus 16 works (detail + history each) with the last three profile lookups refused by the round budget.
+  assert.equal(snapshot.count, 16);
+  const kinds = {};
+  for (const attempt of await store.list('dfp_attempts', { limit: 100 })) kinds[attempt.kind] = (kinds[attempt.kind] || 0) + 1;
+  assert.deepEqual(kinds, { search: 55, note_video: 16, author: 16, user: 13 });
   assert.ok(['CANDIDATE_CAP', 'ROUND_BUDGET'].every(gap => snapshot.coverage.gaps.includes(gap)));
 });
 

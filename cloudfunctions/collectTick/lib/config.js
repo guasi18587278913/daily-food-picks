@@ -141,7 +141,9 @@ function scheduledRound(now, config) {
   return { id, day: shanghaiDay(start), scheduledAt: start, closesAt: start + windowMinutes * 60000, validation, kind,
     sweepEnabled: Boolean(config.sweepCalls), roundCalls, ...(supplement ? { supplement: true, reservedRegularCalls } : {}),
     ...(config.budgetTier === 'expanded250' ? { budgetTier: 'expanded250' } : {}),
-    ...(config.discoveryMode === 'adaptive' ? { discoveryMode: 'adaptive', discoveryLimit: kind === 'sweep' ? 18 : config.budgetTier === 'expanded250' ? 8 : 4,
+    ...(config.discoveryMode === 'adaptive' ? { discoveryMode: 'adaptive',
+      ...(config.budgetTier === 'expanded250' ? { discoveryAllocation: 'candidate-reserve-v2' }
+        : { discoveryLimit: kind === 'sweep' ? 18 : 4 }),
       ...(config.budgetTier === 'expanded250' && kind === 'regular' ? { candidateTarget: 20 } : {}),
       visionEnabled: config.vision?.enabled === true, ...(config.vision?.enabled ? { visionRoundCalls: config.vision.roundCalls } : {}) } : {}) };
 }

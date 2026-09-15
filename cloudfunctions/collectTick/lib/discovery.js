@@ -4,6 +4,7 @@ const { endpoint } = require('./endpoints');
 const { eligibleBoards } = require('./ranking');
 const { previouslyPublished } = require('./publisher');
 const { assertLease } = require('./budget');
+const { cacheKey, readCache, maximumAge } = require('./reuse');
 const POLICY = require('../config/discovery.json');
 const KEYWORDS = require('../config/keywords.json');
 // Content jobs return posts for the candidate pool; the rest return leads (signals) or an author profile.
@@ -20,6 +21,7 @@ function source(kind, params, label, origin = kind, now = 0) {
 }
 function jobFor(seed, round) {
   let params = { ...seed.params };
+  if (seed.kind === 'topic' && round.kind === 'sweep' && ['candidate-reserve-v1', 'candidate-reserve-v2'].includes(round.discoveryAllocation)) params.sort = 'time';
   if (seed.kind === 'search') params = { keyword: seed.params.keyword, note_type: seed.params.note_type || '不限',
     page: 1, sort_type: 'popularity_descending', time_filter: round.kind === 'sweep' ? '一天内' : '一周内',
     source: 'explore_feed', ai_mode: 0 };
@@ -41,11 +43,12 @@ function rankSources(rows, statistics, now, explore) {
 class Discovery {
   constructor({ store, lease, round, progress, clock = Date.now }) {
     Object.assign(this, { store, lease, round, progress, clock });
-    this.ids = new Set(); this.sources = new Map();
+    this.ids = new Set(); this.pendingIds = new Set(); this.sources = new Map();
   }
   async init() {
     const rows = await this.store.list('dfp_candidates', { limit: 100, filters: { roundId: this.round.id } });
     rows.forEach(r => this.ids.add(r.note.noteId));
+    rows.filter(r => !['done', 'skipped'].includes(r.stage)).forEach(r => this.pendingIds.add(r.note.noteId));
     // A worker can stop after inserting a related note but before saving the queue. Reconcile on every resume.
     if (Array.isArray(this.progress.candidateIds)) {
       for (const row of rows.sort((a, b) => a.note.noteId.localeCompare(b.note.noteId)))
@@ -53,7 +56,10 @@ class Discovery {
     }
     const sources = await this.store.list('dfp_results', { limit: POLICY.maxSources, filters: { recordType: 'discovery_source' } });
     sources.forEach(s => this.sources.set(s.key, s));
-    if (this.progress.discovery) return;
+    if (this.progress.discovery) {
+      this.progress.discovery.candidateCount = this.ids.size;
+      this.progress.discovery.pendingCandidateCount = this.pendingIds.size; return;
+    }
     if (!sources.length) {
       const old = await this.store.list('dfp_notes', { limit: 20, descending: true });
       for (const { note } of old) if (note?.authorId) await this.remember(source('author', { user_id: note.authorId }, note.author, 'author', this.clock()));
@@ -76,7 +82,8 @@ class Discovery {
     const firstContent = !explore && ranked.find(s => ['search', 'topic', 'author'].includes(s.kind)) || fixed[0];
     const seeds = [firstContent, meta, ...ranked, ...fixed];
     this.progress.discovery = { jobs: [], index: 0, done: false, successfulContent: 0, freshContent: 0,
-      successfulMetadata: 0, cacheHits: 0, relatedCandidates: 0, stopReason: null };
+      successfulMetadata: 0, cacheHits: 0, relatedCandidates: 0, candidateCount: this.ids.size,
+      pendingCandidateCount: this.pendingIds.size, stopReason: null };
     for (const seed of seeds) { await this.remember(seed); this.enqueue(seed); }
   }
   enqueue(seed, next = false) {
@@ -121,8 +128,24 @@ class Discovery {
     }
   }
   async addNotes(notes, origin, related = false) {
-    for (const note of notes) {
+    for (let note of notes) {
       if (!admitsCandidate(this.round, note) || await previouslyPublished(this.store, note.noteId)) continue;
+      if (this.round.discoveryAllocation === 'candidate-reserve-v2' && note.fans === null
+        && eligibleBoards(note, this.round.scheduledAt, { allowUnknownFans: true }).every(b => b === 'dark')) {
+        try {
+          const now = this.clock(), requestKey = `user:${digest({ user_id: note.authorId })}`;
+          const cached = await readCache(this.store, cacheKey('result', requestKey),
+            { now, maxAgeMs: 21600000, version: 'discovery-provider-1' });
+          if (cached && now - cached.capturedAt <= maximumAge('user', cached.value, now)
+            && Number.isSafeInteger(cached.value.fans) && cached.value.fans >= 0) {
+            note = { ...note, fans: cached.value.fans };
+            if (!admitsCandidate(this.round, note)) {
+              this.progress.discovery.knownHighFanExcluded = (this.progress.discovery.knownHighFanExcluded || 0) + 1;
+              continue;
+            }
+          }
+        } catch { /* A missing author cache is unknown, never a hidden paid lookup. */ }
+      }
       const id = `${this.round.id}_${note.noteId}`;
       const old = await this.store.get('dfp_candidates', id);
       if (!old && this.ids.size >= POLICY.maxCandidates) {
@@ -143,10 +166,30 @@ class Discovery {
       });
       if (!old) {
         this.ids.add(note.noteId);
+        this.pendingIds.add(note.noteId);
+        this.progress.discovery.candidateCount = this.ids.size;
+        this.progress.discovery.pendingCandidateCount = this.pendingIds.size;
         if (Array.isArray(this.progress.candidateIds) && !this.progress.candidateIds.includes(note.noteId)) this.progress.candidateIds.push(note.noteId);
         if (related) this.progress.discovery.relatedCandidates++;
       }
     }
+  }
+  resolved(noteId) {
+    this.pendingIds.delete(noteId);
+    this.progress.discovery.pendingCandidateCount = this.pendingIds.size;
+  }
+  reopen() {
+    const state = this.progress.discovery;
+    if (this.round.discoveryAllocation !== 'candidate-reserve-v2' || !state.done || this.pendingIds.size
+      || this.ids.size >= POLICY.maxCandidates || (this.progress.aiCalls || 0) >= 20
+      || this.clock() >= this.round.closesAt - 300000
+      || !['candidate_target', 'inspection_reserve'].includes(state.stopReason)
+      || state.lastRefillProcessed === this.progress.candidateIndex) return false;
+    state.lastRefillProcessed = this.progress.candidateIndex;
+    state.refillPasses = (state.refillPasses || 0) + 1;
+    state.refillNeedsOrdering = true;
+    state.done = false; state.stopReason = null;
+    return true;
   }
   async rememberCooking(note, origin = 'author') {
     if (note.judgment?.verdict !== 'cooking') return;
@@ -158,9 +201,29 @@ class Discovery {
   async step(provider) {
     const state = this.progress.discovery;
     if (state.done) return false;
-    const target = this.round.candidateTarget || POLICY.candidateTarget[this.round.kind];
-    if (state.index >= state.jobs.length || (this.ids.size >= target && state.freshContent > 0)) {
-      state.done = true; state.stopReason = state.index >= state.jobs.length ? 'exhausted' : 'candidate_target'; return false;
+    const refill = this.round.discoveryAllocation === 'candidate-reserve-v2';
+    const originalTarget = this.round.candidateTarget || POLICY.candidateTarget[this.round.kind];
+    const target = refill ? Math.max(1, Math.min(originalTarget, 20 - (this.progress.aiCalls || 0),
+      POLICY.maxCandidates - this.ids.size + this.pendingIds.size)) : originalTarget;
+    const candidateCount = refill ? this.pendingIds.size : this.ids.size;
+    const dynamic = ['candidate-reserve-v1', 'candidate-reserve-v2'].includes(this.round.discoveryAllocation);
+    if (dynamic && this.clock() >= this.round.closesAt - 300000) {
+      state.done = true; state.stopReason = 'inspection_time_reserve'; return false;
+    }
+    if (dynamic && state.index >= state.jobs.length && candidateCount < target) {
+      // Continue unused, type-specific searches only when the first source batch was too sparse.
+      const words = this.round.kind === 'sweep' ? KEYWORDS.dailySweep.keywords : [...new Set(KEYWORDS.groups.flat())];
+      for (const word of words) for (const note_type of ['视频笔记', '普通笔记']) {
+        if (state.jobs.length >= POLICY.maxTasks) break;
+        const seed = source('search', { keyword: word, note_type }, word, 'keyword', this.clock());
+        const previousSize = state.jobs.length;
+        this.enqueue(seed);
+        if (state.jobs.length > previousSize) await this.remember(seed);
+      }
+    }
+    if (state.index >= state.jobs.length || (candidateCount >= target && state.freshContent > 0)) {
+      state.done = true; state.stopReason = state.index >= state.jobs.length
+        ? state.jobs.length >= POLICY.maxTasks ? 'task_cap' : 'exhausted' : 'candidate_target'; return false;
     }
     const job = state.jobs[state.index];
     if (job.kind === 'faved') {
@@ -192,7 +255,9 @@ class Discovery {
       }
       job.status = 'complete';
     } catch (e) {
-      if (e.code === 'DISCOVERY_BUDGET') { state.done = true; state.stopReason = 'discovery_budget'; return false; }
+      if (['DISCOVERY_BUDGET', 'DISCOVERY_INSPECTION_RESERVE'].includes(e.code)) {
+        state.done = true; state.stopReason = e.code === 'DISCOVERY_BUDGET' ? 'discovery_budget' : 'inspection_reserve'; return false;
+      }
       if (['TICK_LIMIT', 'DAILY_BUDGET', 'ROUND_BUDGET', 'VALIDATION_BUDGET', 'SUPPLEMENT_BUDGET', 'PROVIDER_AUTH', 'LEASE_EXPIRED'].includes(e.code)) throw e;
       job.status = 'failed'; job.errorCode = e.code || 'REQUEST_FAILED';
       if (!this.progress.gaps.includes('REQUEST_FAILED')) this.progress.gaps.push('REQUEST_FAILED');

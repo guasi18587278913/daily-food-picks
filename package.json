@@ -1,6 +1,6 @@
 {
   "name": "daily-food-picks",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "WeChat member trial for cooking content ideas",
   "engines": {

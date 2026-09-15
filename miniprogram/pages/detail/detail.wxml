@@ -7,7 +7,11 @@
   <block wx:elif="{{note}}">
     <view class="source-label">小红书 · 已采集内容</view>
     <text class="title" selectable>{{title}}</text>
-    <view class="byline"><text>{{note.author || '作者未提供'}}</text><text> · {{publishedLabel}}</text></view>
+    <view class="byline">
+      <button wx:if="{{canOpenAuthor}}" class="author-link" bindtap="onOpenAuthor" disabled="{{openingAuthor}}" loading="{{openingAuthor}}" aria-label="查看{{note.author}}的小红书主页">{{note.author || '查看作者'}} ›</button>
+      <text wx:else>{{note.author || '作者未提供'}}</text><text> · {{publishedLabel}}</text>
+    </view>
+    <text wx:if="{{!canOpenAuthor && note.author}}" class="author-unavailable">作者主页入口暂未取得</text>
     <view class="metrics"><text>{{likesLabel}} 赞</text><text>{{collectedLabel}} 收藏</text><text>{{commentsLabel}} 评论</text></view>
     <view wx:if="{{note.type === 'video'}}" class="media-section">
       <video wx:if="{{content.videoUrl && !videoFailed}}" id="note-video" class="video" style="height:{{videoHeight}}rpx" src="{{content.videoUrl}}" poster="{{note.thumbUrl || ''}}" controls show-center-play-btn show-fullscreen-btn object-fit="contain" bindloadedmetadata="onVideoMetadata" binderror="onVideoError" />
